@@ -4,7 +4,7 @@ import joblib
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
-from fpdf import FPDF
+from fpdf2 import FPDF
 import base64
 import numpy as np
 import io
