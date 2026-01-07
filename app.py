@@ -19,7 +19,6 @@ import logging
 
 # Required for Plotly → PNG conversion
 # (Make sure kaleido==0.2.1 is in requirements.txt)
-pio.kaleido.scope.default_format = "png"
 
 # ---------------------------------------------------------
 # STREAMLIT PAGE CONFIG
