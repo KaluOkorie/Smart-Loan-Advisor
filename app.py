@@ -10,18 +10,24 @@ import numpy as np
 import io
 import time
 import shap
+import os
+import logging
 
 # ---------------------------------------------------------
 # SETUP & CONFIGURATION
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="Smart Loan Advisor",
-    page_icon="🏦",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better UI - IMPROVED FOR DARK/LIGHT MODE
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Custom CSS for professional UI
 st.markdown("""
 <style>
     /* Base styles for both themes */
@@ -133,12 +139,46 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
+# MODEL LOADING WITH VALIDATION
+# ---------------------------------------------------------
+@st.cache_resource
+def load_model_and_features():
+    """Load the trained model and feature columns with validation"""
+    model_path = "best_xgb_model.pkl"
+    features_path = "feature_columns.pkl"
+    
+    if not os.path.exists(model_path):
+        st.error(f"Model file not found: {model_path}")
+        st.info("Please ensure the model file is uploaded to the app directory.")
+        return None, None
+    
+    if not os.path.exists(features_path):
+        st.error(f"Feature columns file not found: {features_path}")
+        st.info("Please ensure the feature columns file is uploaded to the app directory.")
+        return None, None
+    
+    try:
+        model = joblib.load(model_path)
+        feature_columns = joblib.load(features_path)
+        logger.info("Model and features loaded successfully")
+        return model, feature_columns
+    except Exception as e:
+        st.error(f"Error loading model: {str(e)}")
+        logger.error(f"Model loading error: {e}")
+        return None, None
+
+# Initialize model
+model, feature_columns = load_model_and_features()
+
+# ---------------------------------------------------------
 # INITIALIZE SESSION STATE
 # ---------------------------------------------------------
 if 'last_submission' not in st.session_state:
     st.session_state.last_submission = 0
 if 'results' not in st.session_state:
     st.session_state.results = None
+if 'model_available' not in st.session_state:
+    st.session_state.model_available = model is not None
 
 # ---------------------------------------------------------
 # UK FINANCIAL STANDARDS
@@ -435,14 +475,14 @@ def generate_shap_explanation(model, X_input, feature_names):
         
         return feature_df
     except Exception as e:
-        st.warning(f"SHAP explanation limited: {str(e)}")
+        logger.warning(f"SHAP explanation limited: {str(e)}")
         return None
 
 # ---------------------------------------------------------
-# ENHANCED PDF REPORT GENERATION
+# ROBUST PDF REPORT GENERATION
 # ---------------------------------------------------------
-def create_enhanced_pdf_report(applicant_data, results, features, shap_data=None):
-    """Generate enhanced PDF report with SHAP visualization"""
+def create_pdf_report(applicant_data, results, features, shap_data=None):
+    """Generate PDF report with fallback options"""
     pdf = FPDF()
     pdf.add_page()
     
@@ -460,23 +500,18 @@ def create_enhanced_pdf_report(applicant_data, results, features, shap_data=None
     pdf.cell(0, 10, 'Applicant Information', 0, 1)
     pdf.set_font('Arial', '', 10)
     
-    pdf.cell(60, 8, 'Credit Score:', 0, 0)
-    pdf.cell(0, 8, str(applicant_data['credit_score']), 0, 1)
+    info_fields = [
+        ('Credit Score:', str(applicant_data['credit_score'])),
+        ('Annual Income:', f"£{applicant_data['income_annum']:,}"),
+        ('Loan Amount:', f"£{applicant_data['loan_amount']:,}"),
+        ('Loan Term:', f"{applicant_data['loan_term']} years"),
+        ('Employment:', applicant_data['self_employed']),
+        ('Education:', applicant_data['education'])
+    ]
     
-    pdf.cell(60, 8, 'Annual Income:', 0, 0)
-    pdf.cell(0, 8, f"£{applicant_data['income_annum']:,}", 0, 1)
-    
-    pdf.cell(60, 8, 'Loan Amount:', 0, 0)
-    pdf.cell(0, 8, f"£{applicant_data['loan_amount']:,}", 0, 1)
-    
-    pdf.cell(60, 8, 'Loan Term:', 0, 0)
-    pdf.cell(0, 8, f"{applicant_data['loan_term']} years", 0, 1)
-    
-    pdf.cell(60, 8, 'Employment:', 0, 0)
-    pdf.cell(0, 8, applicant_data['self_employed'], 0, 1)
-    
-    pdf.cell(60, 8, 'Education:', 0, 0)
-    pdf.cell(0, 8, applicant_data['education'], 0, 1)
+    for label, value in info_fields:
+        pdf.cell(60, 8, label, 0, 0)
+        pdf.cell(0, 8, value, 0, 1)
     
     pdf.ln(5)
     
@@ -485,14 +520,16 @@ def create_enhanced_pdf_report(applicant_data, results, features, shap_data=None
     pdf.cell(0, 10, 'Assessment Results', 0, 1)
     pdf.set_font('Arial', '', 10)
     
-    pdf.cell(60, 8, 'Matching Score:', 0, 0)
-    pdf.cell(0, 8, f"{results['matching_score']}/100", 0, 1)
+    result_fields = [
+        ('Matching Score:', f"{results['matching_score']}/100"),
+        ('Approval Probability:', f"{results['approval_probability']:.1f}%"),
+        ('Status:', results['status']),
+        ('Model Used:', 'Machine Learning' if results.get('model_used', False) else 'Heuristic')
+    ]
     
-    pdf.cell(60, 8, 'Approval Probability:', 0, 0)
-    pdf.cell(0, 8, f"{results['approval_probability']:.1f}%", 0, 1)
-    
-    pdf.cell(60, 8, 'Status:', 0, 0)
-    pdf.cell(0, 8, results['status'], 0, 1)
+    for label, value in result_fields:
+        pdf.cell(60, 8, label, 0, 0)
+        pdf.cell(0, 8, value, 0, 1)
     
     pdf.ln(5)
     
@@ -501,17 +538,16 @@ def create_enhanced_pdf_report(applicant_data, results, features, shap_data=None
     pdf.cell(0, 10, 'Financial Health Metrics', 0, 1)
     pdf.set_font('Arial', '', 10)
     
-    pdf.cell(70, 8, 'Monthly Payment Ratio:', 0, 0)
-    pdf.cell(0, 8, f"{features['monthly_payment_ratio']:.1f}%", 0, 1)
+    metric_fields = [
+        ('Monthly Payment Ratio:', f"{features['monthly_payment_ratio']:.1f}%"),
+        ('Asset Coverage:', f"{features['asset_coverage']:.1f}%"),
+        ('Credit Category:', features['credit_category']),
+        ('Stability Score:', f"{features['stability_score']}/45")
+    ]
     
-    pdf.cell(70, 8, 'Asset Coverage:', 0, 0)
-    pdf.cell(0, 8, f"{features['asset_coverage']:.1f}%", 0, 1)
-    
-    pdf.cell(70, 8, 'Credit Category:', 0, 0)
-    pdf.cell(0, 8, features['credit_category'], 0, 1)
-    
-    pdf.cell(70, 8, 'Stability Score:', 0, 0)
-    pdf.cell(0, 8, f"{features['stability_score']}/45", 0, 1)
+    for label, value in metric_fields:
+        pdf.cell(70, 8, label, 0, 0)
+        pdf.cell(0, 8, value, 0, 1)
     
     pdf.ln(5)
     
@@ -556,15 +592,18 @@ def create_enhanced_pdf_report(applicant_data, results, features, shap_data=None
     pdf.set_font('Arial', 'I', 8)
     pdf.multi_cell(0, 5, "Disclaimer: This is a preliminary assessment based on the information provided. Final loan approval is subject to complete documentation, verification, and the lender's credit policies. Approval probability is an estimate based on historical data and machine learning patterns.")
     
-    return pdf.output(dest='S').encode('latin-1', 'ignore')
+    try:
+        return pdf.output(dest='S').encode('latin-1', 'ignore')
+    except:
+        # Fallback encoding
+        return pdf.output(dest='S').encode('utf-8')
 
 # ---------------------------------------------------------
-# VISUALIZATION FUNCTIONS - IMPROVED FOR ALL THEMES
+# VISUALIZATION FUNCTIONS
 # ---------------------------------------------------------
 def create_score_gauge(score):
-    """Create a gauge chart for matching score with theme-friendly colors"""
-    # Colors that work well in both light and dark modes
-    colors = ['#EF4444', '#F59E0B', '#10B981', '#047857']  # Red, Orange, Green, Dark Green
+    """Create a gauge chart for matching score"""
+    colors = ['#EF4444', '#F59E0B', '#10B981', '#047857']
     
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
@@ -591,7 +630,6 @@ def create_score_gauge(score):
         }
     ))
     
-    # Theme-friendly background
     fig.update_layout(
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
@@ -603,7 +641,7 @@ def create_score_gauge(score):
     return fig
 
 def create_feature_radar(features):
-    """Create radar chart with theme-friendly styling"""
+    """Create radar chart for key metrics"""
     categories = ['Credit Score', 'Affordability', 'Asset Security', 'Stability']
     values = [
         min(100, features['credit_score'] / 9.99),
@@ -649,7 +687,6 @@ def create_shap_chart(shap_data):
     if shap_data is None or shap_data.empty:
         return None
     
-    # Take top 8 features
     plot_data = shap_data.head(8).sort_values('Impact', ascending=True)
     
     fig = go.Figure(go.Bar(
@@ -675,11 +712,41 @@ def create_shap_chart(shap_data):
     return fig
 
 # ---------------------------------------------------------
+# MODEL PREDICTION FUNCTION
+# ---------------------------------------------------------
+def get_model_prediction(model, feature_columns, df_input, applicant_data):
+    """Get prediction from the trained model"""
+    if model is None or feature_columns is None:
+        logger.warning("Model not available, using heuristic scoring")
+        return None, None, None
+    
+    try:
+        # Prepare features for model
+        X_input = df_input.drop(columns=['total_assets'])
+        X_input = pd.get_dummies(X_input)
+        X_input = X_input.reindex(columns=feature_columns, fill_value=0)
+        
+        # Get prediction
+        approval_probability = model.predict_proba(X_input)[0, 1] * 100
+        prediction = model.predict(X_input)[0]
+        
+        # Generate SHAP explanation
+        shap_data = generate_shap_explanation(model, X_input, feature_columns)
+        
+        logger.info(f"Model prediction successful: {approval_probability:.1f}%")
+        return approval_probability, prediction, shap_data
+        
+    except Exception as e:
+        logger.error(f"Model prediction error: {e}")
+        st.warning(f"Model prediction failed: {str(e)}")
+        return None, None, None
+
+# ---------------------------------------------------------
 # MAIN APPLICATION
 # ---------------------------------------------------------
 def main():
-    # Header with improved spacing
-    st.markdown('<h1 class="main-header">UK Smart Loan Advisor</h1>', unsafe_allow_html=True)
+    # Professional header
+    st.markdown('<h1 class="main-header">Smart Loan Advisor</h1>', unsafe_allow_html=True)
     st.markdown("""
     <div class="tip-box">
     <strong>Transparent Loan Assessment:</strong> Get instant, data-driven feedback on your loan eligibility. 
@@ -687,9 +754,15 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
+    # Model status indicator
+    if not st.session_state.model_available:
+        st.warning("**Model Status**: Using heuristic scoring. To enable machine learning predictions, ensure model files are uploaded.")
+    else:
+        st.success("**Model Status**: Machine learning model loaded successfully")
+    
     # Sidebar for inputs
     with st.sidebar:
-        st.markdown('<h3 class="sub-header">📋 Your Information</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 class="sub-header">Your Information</h3>', unsafe_allow_html=True)
         
         # Personal Information
         st.subheader("Personal Details")
@@ -748,7 +821,7 @@ def main():
             )
         
         # Assets
-        st.markdown('<h3 class="sub-header">💰 Your Assets</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 class="sub-header">Your Assets</h3>', unsafe_allow_html=True)
         total_assets = st.number_input(
             "Total Assets Value (£)",
             min_value=0,
@@ -777,9 +850,9 @@ def main():
         else:
             calculate_disabled = False
         
-        # Calculate Button with better styling
+        # Calculate Button
         calculate_btn = st.button(
-            "📊 Check My Eligibility",
+            "Check My Eligibility",
             type="primary",
             disabled=calculate_disabled,
             use_container_width=True
@@ -801,7 +874,7 @@ def main():
         
         if validation_errors:
             for error in validation_errors:
-                st.error(f"❌ {error}")
+                st.error(f"{error}")
             return
         
         # Asset allocation
@@ -855,28 +928,16 @@ def main():
         # Calculate matching score
         matching_score = calculate_matching_score(df_features.iloc[0])
         
-        # Load model and predict
-        try:
-            model = joblib.load("best_xgb_model.pkl")
-            feature_columns = joblib.load("feature_columns.pkl")
-            
-            # Prepare features for model
-            X_input = df_input.drop(columns=['total_assets'])
-            X_input = pd.get_dummies(X_input)
-            X_input = X_input.reindex(columns=feature_columns, fill_value=0)
-            
-            # Get prediction
-            approval_probability = model.predict_proba(X_input)[0, 1] * 100
-            prediction = model.predict(X_input)[0]
-            
-            # Generate SHAP explanation
-            shap_data = generate_shap_explanation(model, X_input, feature_columns)
-            
-        except Exception as e:
-            st.error(f"⚠️ Model error: {str(e)}")
+        # Get model prediction
+        approval_probability, prediction, shap_data = get_model_prediction(
+            model, feature_columns, df_input, uk_display_data
+        )
+        
+        # If model fails, use matching score for probability
+        model_used = approval_probability is not None
+        if not model_used:
             approval_probability = max(20, min(95, matching_score * 0.85))
             prediction = 1 if matching_score >= 60 else 0
-            shap_data = None
         
         # Generate detailed recommendations
         recommendations = generate_detailed_recommendations(
@@ -909,7 +970,8 @@ def main():
             'recommendations': recommendations,
             'applicant_data': uk_display_data,
             'features': df_features.iloc[0].to_dict(),
-            'shap_data': shap_data
+            'shap_data': shap_data,
+            'model_used': model_used
         }
     
     # Display results if available
@@ -917,7 +979,11 @@ def main():
         results = st.session_state.results
         
         # Results Header
-        st.markdown('<h2 class="sub-header">📋 Your Eligibility Report</h2>', unsafe_allow_html=True)
+        st.markdown('<h2 class="sub-header">Your Eligibility Report</h2>', unsafe_allow_html=True)
+        
+        # Model indicator
+        if not results['model_used']:
+            st.info("**Note**: This assessment uses heuristic scoring. For machine learning predictions, ensure model files are properly uploaded.")
         
         # Key Metrics in Columns
         col1, col2, col3, col4 = st.columns(4)
@@ -971,7 +1037,7 @@ def main():
                 st.plotly_chart(shap_chart, use_container_width=True)
         
         # Financial Health Indicators
-        st.markdown('<h3 class="sub-header">💡 Financial Health Check</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 class="sub-header">Financial Health Check</h3>', unsafe_allow_html=True)
         
         col1, col2, col3 = st.columns(3)
         
@@ -1007,9 +1073,9 @@ def main():
             st.caption("Based on employment type, education, and family size")
         
         # Personalized Recommendations
-        st.markdown('<h3 class="sub-header">🎯 Your Action Plan</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 class="sub-header">Your Action Plan</h3>', unsafe_allow_html=True)
         
-        for i, rec in enumerate(results['recommendations'][:6]):  # Show more recommendations
+        for i, rec in enumerate(results['recommendations'][:6]):
             if rec['box_type'] == "success":
                 box_class = "success-box"
             elif rec['box_type'] == "warning":
@@ -1017,7 +1083,7 @@ def main():
             else:
                 box_class = "info-box"
             
-            with st.expander(f"{rec['title']}", expanded=i<2):  # First two expanded by default
+            with st.expander(f"{rec['title']}", expanded=i<2):
                 st.markdown(f"<div class='{box_class}'>", unsafe_allow_html=True)
                 st.write(f"**{rec['message']}**")
                 st.write("")
@@ -1027,7 +1093,7 @@ def main():
                 st.markdown("</div>", unsafe_allow_html=True)
         
         # Next Steps
-        st.markdown('<h3 class="sub-header">🚀 Next Steps</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 class="sub-header">Next Steps</h3>', unsafe_allow_html=True)
         
         if results['matching_score'] >= 65:
             st.markdown("""
@@ -1058,16 +1124,16 @@ def main():
             """, unsafe_allow_html=True)
         
         # Enhanced PDF Report Generation
-        st.markdown('<h3 class="sub-header">📄 Download Full Report</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 class="sub-header">Download Full Report</h3>', unsafe_allow_html=True)
         
         col1, col2, col3 = st.columns([2, 1, 1])
         
         with col1:
-            st.info("Download a comprehensive PDF report including your assessment, SHAP-based decision factors, and personalized recommendations.")
+            st.info("Download a comprehensive PDF report including your assessment, decision factors, and personalized recommendations.")
         
         with col2:
             try:
-                pdf_bytes = create_enhanced_pdf_report(
+                pdf_bytes = create_pdf_report(
                     results['applicant_data'],
                     results,
                     results['features'],
@@ -1076,14 +1142,14 @@ def main():
                 
                 b64 = base64.b64encode(pdf_bytes).decode()
                 current_date = datetime.now().strftime("%Y%m%d")
-                href = f'<a href="data:application/pdf;base64,{b64}" download="Loan_Assessment_{current_date}.pdf" style="background-color: #3B82F6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600;">📥 Download PDF Report</a>'
+                href = f'<a href="data:application/pdf;base64,{b64}" download="Loan_Assessment_{current_date}.pdf" style="background-color: #3B82F6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600;">Download PDF Report</a>'
                 st.markdown(href, unsafe_allow_html=True)
             except Exception as e:
-                # Simple fallback without DejaVu dependency
-                st.warning("Enhanced PDF features require additional setup. Downloading text report instead.")
+                logger.error(f"PDF generation error: {e}")
+                st.warning("PDF generation requires the 'fpdf' package. Please install it.")
         
         with col3:
-            # Always provide text download as fallback
+            # Text report fallback
             report_text = f"""UK LOAN ELIGIBILITY ASSESSMENT
 Generated: {datetime.now().strftime("%d %B %Y")}
 
@@ -1099,6 +1165,7 @@ ASSESSMENT RESULTS:
 Matching Score: {results['matching_score']}/100
 Approval Probability: {results['approval_probability']:.1f}%
 Status: {results['status']}
+Model Used: {'Machine Learning' if results.get('model_used', False) else 'Heuristic'}
 
 FINANCIAL METRICS:
 Monthly Payment Ratio: {results['features']['monthly_payment_ratio']:.1f}%
@@ -1115,7 +1182,7 @@ TOP RECOMMENDATIONS:
                     report_text += f"\n   Key Actions: {rec['actions'][0]}"
             
             st.download_button(
-                label="📄 Text Report",
+                label="Text Report",
                 data=report_text,
                 file_name=f"Loan_Assessment_{datetime.now().strftime('%Y%m%d')}.txt",
                 mime="text/plain"
@@ -1127,7 +1194,7 @@ TOP RECOMMENDATIONS:
         
         with col1:
             st.markdown("""
-            ### 🤔 How It Works
+            ### How It Works
             
             **1. Enter Your Financial Profile**
             Provide details about your income, expenses, assets, and credit history.
@@ -1144,7 +1211,7 @@ TOP RECOMMENDATIONS:
             **5. Download Professional Report**
             Generate a comprehensive PDF report with all assessment details.
             
-            ### 🔍 What We Assess
+            ### What We Assess
             
             • **Credit Health**: Your credit score and payment history  
             • **Payment Capacity**: Can you comfortably afford the monthly payments?  
@@ -1152,7 +1219,7 @@ TOP RECOMMENDATIONS:
             • **Employment Stability**: Job security and income consistency  
             • **Risk Factors**: Self-employment status, dependents, loan terms  
             
-            ### 💡 Why Use This Tool?
+            ### Why Use This Tool?
             
             • **Free & Instant**: No impact on your credit score  
             • **Transparent**: See exactly how decisions are made  
@@ -1164,7 +1231,7 @@ TOP RECOMMENDATIONS:
         with col2:
             st.markdown("""
             <div class="info-box">
-            <h4>💎 UK Financial Tips</h4>
+            <h4>UK Financial Tips</h4>
             <ul style="padding-left: 1.2rem; margin-bottom: 0;">
             <li><strong>Credit Score ≥700</strong> for best interest rates</li>
             <li><strong>Monthly payments ≤35%</strong> of net income</li>
@@ -1179,7 +1246,7 @@ TOP RECOMMENDATIONS:
             # Quick example
             st.markdown("""
             <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1.5rem; border-radius: 10px; margin-top: 1.5rem;">
-            <h4 style="color: white; margin-top: 0;">🏆 Ideal Profile</h4>
+            <h4 style="color: white; margin-top: 0;">Ideal Profile</h4>
             <p style="margin-bottom: 0.5rem;"><strong>Credit Score:</strong> 750+</p>
             <p style="margin-bottom: 0.5rem;"><strong>Income:</strong> £40,000+</p>
             <p style="margin-bottom: 0.5rem;"><strong>Assets:</strong> £75,000+</p>
@@ -1187,12 +1254,12 @@ TOP RECOMMENDATIONS:
             </div>
             """, unsafe_allow_html=True)
     
-    # Enhanced Footer
+    # Professional Footer
     st.markdown("---")
     st.markdown("""
     <div style="text-align: center; color: var(--secondary-text-color); font-size: 0.85rem; line-height: 1.5;">
     <p><strong>Important Disclaimer:</strong> This tool provides preliminary assessment only. Final loan approval is subject to complete documentation, credit checks, and individual lender policies. Approval probability estimates are based on historical data and machine learning patterns. Results are not a guarantee of approval. Always consult with qualified financial advisors before making borrowing decisions.</p>
-    <p style="margin-top: 0.5rem;">© 2024 Smart Solution to Tough Data • UK Representative APR 4.9% - 19.9% •</p>
+    <p style="margin-top: 0.5rem;">© 2024 Smart Loan Advisor • UK Representative APR 4.9% - 19.9% • All calculations in GBP (£)</p>
     </div>
     """, unsafe_allow_html=True)
 
