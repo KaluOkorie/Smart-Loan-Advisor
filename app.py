@@ -429,291 +429,131 @@ def generate_shap_explanation(model, X_input, feature_names):
         return None
 
 # ---------------------------------------------------------
-# DOCX REPORT GENERATION
-# ---------------------------------------------------------
-def create_docx_report(applicant_data, results, features, shap_data=None):
-    """Generate professional DOCX report"""
-    if not DOCX_AVAILABLE:
-        raise ImportError("python-docx package not available")
-    
-    doc = Document()
-    
-    # Add title
-    title = doc.add_heading('UK Loan Pre-Approval Report', 0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    # Add date
-    date_para = doc.add_paragraph(f'Generated: {datetime.now().strftime("%d %B %Y at %H:%M")}')
-    date_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    doc.add_paragraph()
-    
-    # Section 1: Applicant Information
-    doc.add_heading('Applicant Information', level=1)
-    
-    info_table = doc.add_table(rows=7, cols=2)
-    info_table.style = 'Light Shading'
-    
-    info_rows = [
-        ("Credit Score:", str(applicant_data['credit_score'])),
-        ("Annual Income:", f"£{applicant_data['income_annum']:,}"),
-        ("Loan Amount:", f"£{applicant_data['loan_amount']:,}"),
-        ("Loan Term:", f"{applicant_data['loan_term']} years"),
-        ("Employment:", applicant_data['self_employed']),
-        ("Education:", applicant_data['education']),
-        ("Total Assets:", f"£{applicant_data['total_assets']:,}")
-    ]
-    
-    for i, (label, value) in enumerate(info_rows):
-        info_table.rows[i].cells[0].text = label
-        info_table.rows[i].cells[1].text = value
-    
-    doc.add_paragraph()
-    
-    # Section 2: Assessment Results
-    doc.add_heading('Assessment Results', level=1)
-    
-    results_table = doc.add_table(rows=3, cols=2)
-    results_table.style = 'Light Shading'
-    
-    results_rows = [
-        ("Approval Probability:", f"{results['approval_probability']:.1f}%"),
-        ("Status:", results['status']),
-        ("Model Used:", "Machine Learning Model")
-    ]
-    
-    for i, (label, value) in enumerate(results_rows):
-        results_table.rows[i].cells[0].text = label
-        results_table.rows[i].cells[1].text = value
-    
-    doc.add_paragraph()
-    
-    # Section 3: Financial Health Metrics
-    doc.add_heading('Financial Health Metrics', level=1)
-    
-    metrics_table = doc.add_table(rows=4, cols=2)
-    metrics_table.style = 'Light Shading'
-    
-    metrics_rows = [
-        ("Monthly Payment Ratio:", f"{features['monthly_payment_ratio']:.1f}%"),
-        ("Asset Coverage:", f"{features['asset_coverage']:.1f}%"),
-        ("Credit Category:", features['credit_category']),
-        ("Stability Score:", f"{features['stability_score']}/45")
-    ]
-    
-    for i, (label, value) in enumerate(metrics_rows):
-        metrics_table.rows[i].cells[0].text = label
-        metrics_table.rows[i].cells[1].text = value
-    
-    doc.add_paragraph()
-    
-    # Section 4: Decision Factors (if SHAP data available)
-    if shap_data is not None and not shap_data.empty:
-        doc.add_heading('Top Decision Factors', level=1)
-        
-        factors_table = doc.add_table(rows=min(6, len(shap_data)) + 1, cols=2)
-        factors_table.style = 'Light Shading'
-        
-        # Header row
-        factors_table.rows[0].cells[0].text = "Feature"
-        factors_table.rows[0].cells[1].text = "Impact"
-        
-        # Data rows
-        for idx, row in shap_data.head(5).iterrows():
-            factor = row['Feature'].replace('_', ' ').title()
-            impact = row['Impact']
-            factors_table.rows[idx + 1].cells[0].text = factor
-            factors_table.rows[idx + 1].cells[1].text = f"{impact:.4f}"
-        
-        doc.add_paragraph()
-    
-    # Section 5: Personalized Recommendations
-    doc.add_heading('Personalized Recommendations', level=1)
-    
-    for i, rec in enumerate(results['recommendations'][:4], 1):
-        doc.add_heading(f"{i}. {rec['title']}", level=2)
-        doc.add_paragraph(rec['message'])
-        
-        if rec['actions']:
-            doc.add_paragraph("Recommended Actions:")
-            for action in rec['actions']:
-                p = doc.add_paragraph(action, style='List Bullet')
-        
-        doc.add_paragraph()
-    
-    # Section 6: Action Steps
-    doc.add_heading('Immediate Action Steps', level=1)
-    
-    # Get first 2 recommendations with actions
-    action_recommendations = results['recommendations'][:2]
-    for rec in action_recommendations:
-        if rec['actions']:
-            for action in rec['actions'][:2]:  # First 2 actions from each
-                doc.add_paragraph(action, style='List Bullet')
-    
-    doc.add_paragraph()
-    
-    # Section 7: Next Steps
-    doc.add_heading('Next Steps', level=1)
-    
-    if results['approval_probability'] >= 65:
-        next_steps = [
-            "Gather Documentation: 3 months of bank statements, proof of address, ID documents",
-            "Compare Lenders: Apply to 2-3 reputable UK lenders to compare offers",
-            "Submit Application: Complete online forms with all supporting documents",
-            "Follow Up: Expect initial decision within 2-4 working days"
-        ]
-    else:
-        next_steps = [
-            "Credit Building: Obtain free credit reports and address any issues",
-            "Savings Growth: Build emergency fund to 3-6 months of expenses",
-            "Debt Management: Reduce existing debts to improve affordability ratios",
-            "Professional Advice: Consult with free financial advisors for personalized guidance",
-            "Reassess in 3-6 months for improved eligibility"
-        ]
-    
-    for step in next_steps:
-        doc.add_paragraph(step, style='List Bullet')
-    
-    doc.add_paragraph()
-    
-    # Footer with disclaimer
-    doc.add_heading('Disclaimer', level=2)
-    disclaimer_text = """
-    This is a preliminary assessment based on the information provided. 
-    Final loan approval is subject to complete documentation, verification, 
-    and the lender's credit policies. Approval probability is an estimate 
-    based on historical data and machine learning patterns. 
-    Results are not a guarantee of approval. Always consult with qualified 
-    financial advisors before making borrowing decisions.
-    """
-    doc.add_paragraph(disclaimer_text)
-    
-    # Add footer with date and page number
-    section = doc.sections[0]
-    footer = section.footer
-    footer_para = footer.paragraphs[0]
-    footer_para.text = f"Smart Loan Advisor • {datetime.now().strftime('%d %B %Y')} • Page "
-    footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    # Save to bytes
-    docx_bytes = io.BytesIO()
-    doc.save(docx_bytes)
-    docx_bytes.seek(0)
-    
-    return docx_bytes.getvalue()
-
-# ---------------------------------------------------------
-# VISUALIZATION FUNCTIONS
+# SIMPLIFIED VISUALIZATION FUNCTIONS (FIXED FOR RENDERING)
 # ---------------------------------------------------------
 def create_score_gauge(score):
-    """Create a gauge chart for approval probability"""
-    colors = ['#EF4444', '#F59E0B', '#10B981', '#047857']
-    
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=score,
-        domain={'x': [0, 1], 'y': [0, 1]},
-        title={'text': "Approval Probability", 'font': {'size': 20}},
-        gauge={
-            'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "darkgray"},
-            'bar': {'color': "#3B82F6"},
-            'bgcolor': "rgba(0,0,0,0)",
-            'borderwidth': 2,
-            'bordercolor': "gray",
-            'steps': [
-                {'range': [0, 50], 'color': colors[0]},
-                {'range': [50, 70], 'color': colors[1]},
-                {'range': [70, 85], 'color': colors[2]},
-                {'range': [85, 100], 'color': colors[3]}
-            ],
-            'threshold': {
-                'line': {'color': "black", 'width': 3},
-                'thickness': 0.85,
-                'value': 70
+    """Create a SIMPLIFIED gauge chart for approval probability"""
+    try:
+        colors = ['#EF4444', '#F59E0B', '#10B981', '#047857']
+        
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=score,
+            domain={'x': [0, 1], 'y': [0, 1]},
+            title={'text': "Approval Probability", 'font': {'size': 16}},
+            gauge={
+                'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "darkgray"},
+                'bar': {'color': "#3B82F6"},
+                'bgcolor': "rgba(0,0,0,0)",
+                'borderwidth': 1,
+                'bordercolor': "gray",
+                'steps': [
+                    {'range': [0, 50], 'color': colors[0]},
+                    {'range': [50, 70], 'color': colors[1]},
+                    {'range': [70, 85], 'color': colors[2]},
+                    {'range': [85, 100], 'color': colors[3]}
+                ],
+                'threshold': {
+                    'line': {'color': "black", 'width': 2},
+                    'thickness': 0.75,
+                    'value': 70
+                }
             }
-        }
-    ))
-    
-    fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='var(--primary-text-color)', family="Arial"),
-        height=300,
-        margin=dict(l=30, r=30, t=50, b=30)
-    )
-    
-    return fig
+        ))
+        
+        fig.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='var(--primary-text-color)', family="Arial"),
+            height=250,
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+        
+        return fig
+    except Exception as e:
+        logger.error(f"Error creating gauge chart: {e}")
+        return None
 
 def create_feature_radar(features):
-    """Create radar chart for key metrics"""
-    categories = ['Credit Score', 'Affordability', 'Asset Security', 'Stability']
-    values = [
-        min(100, features['credit_score'] / 9.99),
-        100 - min(100, features['monthly_payment_ratio']),
-        min(100, features['asset_coverage'] / 2.5),
-        min(100, features['stability_score'] / 45 * 100)
-    ]
-    
-    fig = go.Figure(data=go.Scatterpolar(
-        r=values + [values[0]],
-        theta=categories + [categories[0]],
-        fill='toself',
-        fillcolor='rgba(59, 130, 246, 0.3)',
-        line_color='rgb(59, 130, 246)',
-        line_width=2
-    ))
-    
-    fig.update_layout(
-        polar=dict(
-            radialaxis=dict(
-                visible=True,
-                range=[0, 100],
-                gridcolor='rgba(128, 128, 128, 0.3)',
-                linecolor='gray'
+    """Create SIMPLIFIED radar chart for key metrics"""
+    try:
+        categories = ['Credit', 'Affordability', 'Assets', 'Stability']
+        values = [
+            min(100, features['credit_score'] / 9.99),
+            100 - min(100, features['monthly_payment_ratio'] * 1.5),
+            min(100, features['asset_coverage'] / 2.0),
+            min(100, features['stability_score'] / 45 * 100)
+        ]
+        
+        fig = go.Figure(data=go.Scatterpolar(
+            r=values + [values[0]],
+            theta=categories + [categories[0]],
+            fill='toself',
+            fillcolor='rgba(59, 130, 246, 0.2)',
+            line_color='rgb(59, 130, 246)',
+            line_width=1.5
+        ))
+        
+        fig.update_layout(
+            polar=dict(
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 100],
+                    gridcolor='rgba(128, 128, 128, 0.2)',
+                    linecolor='lightgray'
+                ),
+                angularaxis=dict(
+                    gridcolor='rgba(128, 128, 128, 0.2)',
+                    linecolor='lightgray'
+                ),
+                bgcolor='rgba(0,0,0,0)'
             ),
-            angularaxis=dict(
-                gridcolor='rgba(128, 128, 128, 0.3)',
-                linecolor='gray'
-            ),
-            bgcolor='rgba(0,0,0,0)'
-        ),
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='var(--primary-text-color)'),
-        showlegend=False,
-        height=300,
-        margin=dict(l=50, r=50, t=30, b=30)
-    )
-    
-    return fig
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='var(--primary-text-color)', size=10),
+            showlegend=False,
+            height=250,
+            margin=dict(l=30, r=30, t=20, b=20)
+        )
+        
+        return fig
+    except Exception as e:
+        logger.error(f"Error creating radar chart: {e}")
+        return None
 
 def create_shap_chart(shap_data):
-    """Create horizontal bar chart for SHAP feature importance"""
+    """Create SIMPLIFIED horizontal bar chart for SHAP feature importance"""
     if shap_data is None or shap_data.empty:
         return None
     
-    plot_data = shap_data.head(8).sort_values('Impact', ascending=True)
-    
-    fig = go.Figure(go.Bar(
-        x=plot_data['Impact'],
-        y=plot_data['Feature'].str.replace('_', ' ').str.title(),
-        orientation='h',
-        marker_color='#3B82F6',
-        text=plot_data['Impact'].round(4),
-        textposition='outside'
-    ))
-    
-    fig.update_layout(
-        title='Top Decision Factors',
-        xaxis_title='Impact on Decision',
-        yaxis_title='Feature',
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='var(--primary-text-color)'),
-        height=300,
-        margin=dict(l=100, r=20, t=40, b=20)
-    )
-    
-    return fig
+    try:
+        # Take only top 5 features for simplicity
+        plot_data = shap_data.head(5).sort_values('Impact', ascending=True)
+        
+        fig = go.Figure(go.Bar(
+            x=plot_data['Impact'],
+            y=plot_data['Feature'].str.replace('_', ' ').str.title(),
+            orientation='h',
+            marker_color='#3B82F6',
+            text=[f"{x:.3f}" for x in plot_data['Impact']],
+            textposition='outside',
+            textfont=dict(size=10)
+        ))
+        
+        fig.update_layout(
+            title=dict(text='Top Decision Factors', font=dict(size=14)),
+            xaxis_title='Impact',
+            yaxis_title='',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='var(--primary-text-color)', size=10),
+            height=250,
+            margin=dict(l=80, r=20, t=40, b=20)
+        )
+        
+        return fig
+    except Exception as e:
+        logger.error(f"Error creating SHAP chart: {e}")
+        return None
 
 # ---------------------------------------------------------
 # MODEL PREDICTION FUNCTION - NO FALLBACK
@@ -744,7 +584,122 @@ def get_model_prediction(model, feature_columns, df_input):
         raise ValueError(f"Model prediction failed: {str(e)}")
 
 # ---------------------------------------------------------
-# MAIN APPLICATION
+# DOCX REPORT GENERATION (OPTIONAL)
+# ---------------------------------------------------------
+def create_docx_report(applicant_data, results, features, shap_data=None):
+    """Generate professional DOCX report"""
+    if not DOCX_AVAILABLE:
+        raise ImportError("python-docx package not available")
+    
+    try:
+        doc = Document()
+        
+        # Add title
+        title = doc.add_heading('UK Loan Pre-Approval Report', 0)
+        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        # Add date
+        date_para = doc.add_paragraph(f'Generated: {datetime.now().strftime("%d %B %Y at %H:%M")}')
+        date_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_paragraph()
+        
+        # Section 1: Applicant Information
+        doc.add_heading('Applicant Information', level=1)
+        
+        info_table = doc.add_table(rows=7, cols=2)
+        info_table.style = 'Light Shading'
+        
+        info_rows = [
+            ("Credit Score:", str(applicant_data['credit_score'])),
+            ("Annual Income:", f"£{applicant_data['income_annum']:,}"),
+            ("Loan Amount:", f"£{applicant_data['loan_amount']:,}"),
+            ("Loan Term:", f"{applicant_data['loan_term']} years"),
+            ("Employment:", applicant_data['self_employed']),
+            ("Education:", applicant_data['education']),
+            ("Total Assets:", f"£{applicant_data['total_assets']:,}")
+        ]
+        
+        for i, (label, value) in enumerate(info_rows):
+            info_table.rows[i].cells[0].text = label
+            info_table.rows[i].cells[1].text = value
+        
+        doc.add_paragraph()
+        
+        # Section 2: Assessment Results
+        doc.add_heading('Assessment Results', level=1)
+        
+        results_table = doc.add_table(rows=3, cols=2)
+        results_table.style = 'Light Shading'
+        
+        results_rows = [
+            ("Approval Probability:", f"{results['approval_probability']:.1f}%"),
+            ("Status:", results['status']),
+            ("Model Used:", "Machine Learning Model")
+        ]
+        
+        for i, (label, value) in enumerate(results_rows):
+            results_table.rows[i].cells[0].text = label
+            results_table.rows[i].cells[1].text = value
+        
+        doc.add_paragraph()
+        
+        # Section 3: Financial Health Metrics
+        doc.add_heading('Financial Health Metrics', level=1)
+        
+        metrics_table = doc.add_table(rows=4, cols=2)
+        metrics_table.style = 'Light Shading'
+        
+        metrics_rows = [
+            ("Monthly Payment Ratio:", f"{features['monthly_payment_ratio']:.1f}%"),
+            ("Asset Coverage:", f"{features['asset_coverage']:.1f}%"),
+            ("Credit Category:", features['credit_category']),
+            ("Stability Score:", f"{features['stability_score']}/45")
+        ]
+        
+        for i, (label, value) in enumerate(metrics_rows):
+            metrics_table.rows[i].cells[0].text = label
+            metrics_table.rows[i].cells[1].text = value
+        
+        doc.add_paragraph()
+        
+        # Section 4: Recommendations
+        doc.add_heading('Personalized Recommendations', level=1)
+        
+        for i, rec in enumerate(results['recommendations'][:3], 1):
+            doc.add_heading(f"{i}. {rec['title']}", level=2)
+            doc.add_paragraph(rec['message'])
+            
+            if rec['actions']:
+                doc.add_paragraph("Recommended Actions:")
+                for action in rec['actions'][:2]:
+                    p = doc.add_paragraph(action, style='List Bullet')
+            
+            doc.add_paragraph()
+        
+        # Footer with disclaimer
+        doc.add_heading('Disclaimer', level=2)
+        disclaimer_text = """
+        This is a preliminary assessment based on the information provided. 
+        Final loan approval is subject to complete documentation, verification, 
+        and the lender's credit policies. Approval probability is an estimate 
+        based on historical data and machine learning patterns. 
+        Results are not a guarantee of approval. Always consult with qualified 
+        financial advisors before making borrowing decisions.
+        """
+        doc.add_paragraph(disclaimer_text)
+        
+        # Save to bytes
+        docx_bytes = io.BytesIO()
+        doc.save(docx_bytes)
+        docx_bytes.seek(0)
+        
+        return docx_bytes.getvalue()
+    except Exception as e:
+        logger.error(f"DOCX report generation error: {e}")
+        raise
+
+# ---------------------------------------------------------
+# MAIN APPLICATION WITH FIXED CHART RENDERING
 # ---------------------------------------------------------
 def main():
     # Professional header
@@ -1000,9 +955,52 @@ def main():
             """)
             return
     
-    # Display results if available
+    # Display results if available - USING FRAGMENT TO FIX CHART RENDERING
     if st.session_state.results:
         results = st.session_state.results
+        
+        # Use fragment to isolate chart rendering
+        @st.fragment
+        def display_charts_section(results):
+            """Isolate chart rendering in a fragment to prevent conflicts"""
+            # Charts Row with error handling
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                try:
+                    gauge_fig = create_score_gauge(results['approval_probability'])
+                    if gauge_fig:
+                        st.plotly_chart(gauge_fig, use_container_width=True, key="score_gauge")
+                    else:
+                        st.warning("Unable to display approval probability gauge.")
+                except Exception as e:
+                    st.error(f"Gauge chart error: {str(e)}")
+                    st.info("Approval Probability: {:.1f}%".format(results['approval_probability']))
+            
+            with col2:
+                try:
+                    radar_fig = create_feature_radar(results['features'])
+                    if radar_fig:
+                        st.plotly_chart(radar_fig, use_container_width=True, key="feature_radar")
+                    else:
+                        st.warning("Unable to display feature radar chart.")
+                        # Show metrics as text
+                        st.write("**Credit Score:** {:.0f}".format(results['features']['credit_score']))
+                        st.write("**Payment Ratio:** {:.1f}%".format(results['features']['monthly_payment_ratio']))
+                        st.write("**Asset Coverage:** {:.1f}%".format(results['features']['asset_coverage']))
+                except Exception as e:
+                    st.error(f"Radar chart error: {str(e)}")
+            
+            # SHAP Explanation Chart if available
+            if results.get('shap_data') is not None:
+                try:
+                    shap_fig = create_shap_chart(results['shap_data'])
+                    if shap_fig:
+                        st.plotly_chart(shap_fig, use_container_width=True, key="shap_chart")
+                    else:
+                        st.info("SHAP analysis completed but chart not available.")
+                except Exception as e:
+                    st.error(f"SHAP chart error: {str(e)}")
         
         # Results Header
         st.markdown('<h2 class="sub-header">Your Eligibility Report</h2>', unsafe_allow_html=True)
@@ -1046,20 +1044,8 @@ def main():
                 value=decision
             )
         
-        # Charts Row
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.plotly_chart(create_score_gauge(results['approval_probability']), use_container_width=True)
-        
-        with col2:
-            st.plotly_chart(create_feature_radar(results['features']), use_container_width=True)
-        
-        # SHAP Explanation Chart if available
-        if results.get('shap_data') is not None:
-            shap_chart = create_shap_chart(results['shap_data'])
-            if shap_chart:
-                st.plotly_chart(shap_chart, use_container_width=True)
+        # Display charts using the fragment
+        display_charts_section(results)
         
         # Financial Health Indicators
         st.markdown('<h3 class="sub-header">Financial Health Check</h3>', unsafe_allow_html=True)
@@ -1148,17 +1134,18 @@ def main():
             </div>
             """, unsafe_allow_html=True)
         
-        # Enhanced DOCX Report Generation
+        # Report Download Section
         st.markdown('<h3 class="sub-header">Download Full Report</h3>', unsafe_allow_html=True)
         
         col1, col2, col3 = st.columns([2, 1, 1])
         
         with col1:
-            st.info("Download a comprehensive DOCX report including your assessment, decision factors, and personalized recommendations.")
+            st.info("Download a comprehensive report including your assessment, decision factors, and personalized recommendations.")
         
         with col2:
-            try:
-                if DOCX_AVAILABLE:
+            # DOCX Report
+            if DOCX_AVAILABLE:
+                try:
                     docx_bytes = create_docx_report(
                         results['applicant_data'],
                         results,
@@ -1168,14 +1155,13 @@ def main():
                     
                     b64 = base64.b64encode(docx_bytes).decode()
                     current_date = datetime.now().strftime("%Y%m%d")
-                    href = f'<a href="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64}" download="Loan_Assessment_{current_date}.docx" style="background-color: #3B82F6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600;">Download DOCX Report</a>'
+                    href = f'<a href="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64}" download="Loan_Assessment_{current_date}.docx" style="background-color: #3B82F6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600; margin-bottom: 10px;">Download DOCX Report</a>'
                     st.markdown(href, unsafe_allow_html=True)
-                else:
-                    st.warning("DOCX generation requires 'python-docx' package.")
-                    st.info("Install with: pip install python-docx")
-            except Exception as e:
-                logger.error(f"DOCX generation error: {e}")
-                st.warning(f"DOCX generation failed: {str(e)}")
+                except Exception as e:
+                    st.warning(f"DOCX report unavailable: {str(e)}")
+            else:
+                st.warning("DOCX report requires 'python-docx' package.")
+                st.info("Install: pip install python-docx")
         
         with col3:
             # Text report fallback (always available)
@@ -1215,7 +1201,7 @@ TOP RECOMMENDATIONS:
                 report_text += "\n"
             
             report_text += "\n---\n"
-            report_text += "Disclaimer: This is a preliminary assessment based on the information provided. Final loan approval is subject to complete documentation, verification, and the lender's credit policies. Approval probability is an estimate based on historical data and machine learning patterns."
+            report_text += "Disclaimer: This is a preliminary assessment based on the information provided. Final loan approval is subject to complete documentation, verification, and the lender's credit policies."
             
             st.download_button(
                 label="Text Report",
