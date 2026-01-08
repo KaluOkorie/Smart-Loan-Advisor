@@ -74,7 +74,7 @@ Deployment requires production‑ready thinking
 Your loan advisory system is fully deployed and ready to explore. 
 Test different financial profiles, see real‑time predictions, and understand exactly how the model makes its decisions.
 
-[👉 Live Demo Here](https://smart-loan-advisor-fiappwkmt8s3stsq6a82j6c.streamlit.app/)
+[👉 Live Demo Here](https://huggingface.co/spaces/Kalu0147/credit-risk-advisor)
 
 ## What You Can Do in the App
 Run instant loan assessments with your own inputs
