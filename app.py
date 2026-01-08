@@ -701,7 +701,34 @@ def create_shap_chart(shap_data):
     )
     
     return fig
-
+def save_plotly_fig(fig, filename):
+    """Save Plotly figure as image with Kaleido configuration"""
+    try:
+        # Configure Kaleido for headless environments (critical for Streamlit Cloud)
+        import plotly.io as pio
+        
+        # Set Chromium arguments for headless environments[citation:1]
+        if hasattr(pio.kaleido.scope, 'chromium_args'):
+            pio.kaleido.scope.chromium_args = (
+                "--headless",
+                "--no-sandbox", 
+                "--single-process",
+                "--disable-gpu",
+                "--disable-dev-shm-usage"
+            )
+        
+        # Save the figure
+        img_bytes = pio.to_image(fig, format='png', width=600, height=400)
+        with open(filename, 'wb') as f:
+            f.write(img_bytes)
+        return filename
+        
+    except Exception as e:
+        # Fallback: Save as HTML if PNG export fails
+        st.warning(f"Image export using Kaleido failed: {str(e)}. Using HTML fallback.")
+        html_filename = filename.replace('.png', '.html')
+        pio.write_html(fig, file=html_filename)
+        return html_filename
 # ---------------------------------------------------------
 # MAIN APPLICATION
 # ---------------------------------------------------------
