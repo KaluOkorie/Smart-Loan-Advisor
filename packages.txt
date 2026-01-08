@@ -1,2 +1,3 @@
-chromium-browser
-chromium-chromedriver
+# For Debian bookworm (Streamlit Cloud's current OS)
+chromium
+chromedriver
