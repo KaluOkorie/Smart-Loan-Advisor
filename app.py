@@ -1,76 +1,133 @@
-# app.py
+"""
+Smart Credit Risk Advisor
+Professional Loan Eligibility Assessment System
+"""
+
 import streamlit as st
 import pandas as pd
 import joblib
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
+import base64
 import numpy as np
 import io
 import time
 import shap
 from docx import Document
-from docx.shared import Inches
-from io import BytesIO
+from docx.shared import Inches, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+import matplotlib.pyplot as plt
+import plotly.io as pio
 
 # ---------------------------------------------------------
 # SETUP & CONFIGURATION
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="Smart Loan Advisor",
-    page_icon=None,
+    page_title="Credit Risk Assessment System",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better UI (theme-aware)
-st.markdown(
-    """
-    <style>
-        .main-header { font-size: 2.2rem; font-weight: 700; margin-bottom: 1rem; color:var(--primary-text-color); }
-        .sub-header { font-size: 1.25rem; font-weight: 600; margin-top: 1rem; margin-bottom: 1rem; color:var(--secondary-text-color); }
-        .tip-box { background-color: var(--background-secondary); padding: 1rem; border-radius: 8px; border-left: 4px solid var(--primary-color); margin: 1rem 0; }
-        .success-box { background-color: rgba(16,185,129,0.08); padding: 1rem; border-radius: 8px; border-left: 4px solid #10B981; margin: 0.5rem 0; border: 1px solid rgba(16,185,129,0.12); }
-        .warning-box { background-color: rgba(245,158,11,0.06); padding: 1rem; border-radius: 8px; border-left: 4px solid #F59E0B; margin: 0.5rem 0; border: 1px solid rgba(245,158,11,0.12); }
-        .info-box { background-color: rgba(14,165,233,0.06); padding: 1rem; border-radius: 8px; border-left: 4px solid #0EA5E9; margin: 0.5rem 0; border: 1px solid rgba(14,165,233,0.12); }
-        .stMetric { min-height: 100px; }
-        .stMetric > div { min-height: 85px; }
-        .stMetric label { font-size: 0.95rem !important; font-weight: 600 !important; }
-        :root {
-            --primary-color: #3B82F6;
-            --secondary-color: #10B981;
-            --background-primary: #FFFFFF;
-            --background-secondary: #F3F4F6;
-            --primary-text-color: #111827;
-            --secondary-text-color: #374151;
-        }
-        @media (prefers-color-scheme: dark) {
-            :root {
-                --primary-color: #60A5FA;
-                --secondary-color: #34D399;
-                --background-primary: #1F2937;
-                --background-secondary: #374151;
-                --primary-text-color: #F9FAFB;
-                --secondary-text-color: #D1D5DB;
-            }
-        }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+# Professional CSS
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.2rem;
+        font-weight: 700;
+        margin-bottom: 1.2rem;
+        color: #1a237e;
+    }
+    
+    .sub-header {
+        font-size: 1.4rem;
+        font-weight: 600;
+        margin-top: 1.5rem;
+        margin-bottom: 1rem;
+        color: #283593;
+    }
+    
+    .metric-container {
+        background-color: #f5f7fa;
+        padding: 1.2rem;
+        border-radius: 8px;
+        border-left: 4px solid #3f51b5;
+        margin: 0.5rem 0;
+    }
+    
+    .success-container {
+        background-color: rgba(76, 175, 80, 0.1);
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid #4caf50;
+        margin: 0.5rem 0;
+    }
+    
+    .warning-container {
+        background-color: rgba(255, 152, 0, 0.1);
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid #ff9800;
+        margin: 0.5rem 0;
+    }
+    
+    .info-container {
+        background-color: rgba(33, 150, 243, 0.1);
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid #2196f3;
+        margin: 0.5rem 0;
+    }
+    
+    .stMetric {
+        min-height: 100px;
+    }
+    
+    .stMetric > div {
+        min-height: 85px;
+    }
+    
+    .stMetric label {
+        font-size: 0.9rem !important;
+        font-weight: 600 !important;
+        color: #455a64 !important;
+    }
+    
+    .sidebar-section {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
+        border: 1px solid #e0e0e0;
+    }
+    
+    .disclaimer-box {
+        background-color: #fff3e0;
+        padding: 1rem;
+        border-radius: 6px;
+        border-left: 4px solid #ff9800;
+        margin: 1rem 0;
+        font-size: 0.85rem;
+        line-height: 1.4;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # INITIALIZE SESSION STATE
 # ---------------------------------------------------------
-if "last_submission" not in st.session_state:
+if 'last_submission' not in st.session_state:
     st.session_state.last_submission = 0
-if "results" not in st.session_state:
+if 'results' not in st.session_state:
     st.session_state.results = None
+if 'charts' not in st.session_state:
+    st.session_state.charts = {}
 
 # ---------------------------------------------------------
 # UK FINANCIAL STANDARDS
 # ---------------------------------------------------------
-CONVERSION_RATE = 100  # scale factors used by model input
+CONVERSION_RATE = 100
 UK_AVERAGE_SALARY = 35000
 UK_AVERAGE_HOUSE_PRICE = 250000
 UK_ASSET_MULTIPLIER = 5
@@ -79,493 +136,1014 @@ UK_ASSET_MULTIPLIER = 5
 # FEATURE ENGINEERING FUNCTIONS
 # ---------------------------------------------------------
 def create_credit_features(df):
+    """Create engineered features for credit assessment"""
     df_engineered = df.copy()
-    monthly_income = df_engineered["income_annum"] / 12
-    monthly_loan_payment = (df_engineered["loan_amount"] / df_engineered["loan_term"]) / 12
-    df_engineered["monthly_payment_ratio"] = (monthly_loan_payment / monthly_income) * 100
-    df_engineered["asset_coverage"] = (df_engineered["total_assets"] / df_engineered["loan_amount"]) * 100
-    df_engineered["loan_to_income"] = (df_engineered["loan_amount"] / df_engineered["income_annum"]) * 100
-
+    
+    # Monthly calculations
+    monthly_income = df_engineered['income_annum'] / 12
+    monthly_loan_payment = (df_engineered['loan_amount'] / df_engineered['loan_term']) / 12
+    
+    # Key ratios
+    df_engineered['monthly_payment_ratio'] = (monthly_loan_payment / monthly_income) * 100
+    df_engineered['asset_coverage'] = (df_engineered['total_assets'] / df_engineered['loan_amount']) * 100
+    df_engineered['loan_to_income'] = (df_engineered['loan_amount'] / df_engineered['income_annum']) * 100
+    
+    # Credit score categories
     def categorize_credit_score(score):
         if score >= 900:
-            return "Excellent"
+            return 'Excellent'
         elif score >= 800:
-            return "Very Good"
+            return 'Very Good'
         elif score >= 700:
-            return "Good"
+            return 'Good'
         elif score >= 600:
-            return "Fair"
+            return 'Fair'
         else:
-            return "Needs Improvement"
-
-    df_engineered["credit_category"] = df_engineered["credit_score"].apply(categorize_credit_score)
-    df_engineered["stability_score"] = 0
-    df_engineered.loc[df_engineered["self_employed"] == "No", "stability_score"] += 30
-    df_engineered.loc[df_engineered["education"] == "Graduate", "stability_score"] += 20
-    df_engineered.loc[df_engineered["no_of_dependents"] <= 2, "stability_score"] += 10
-
+            return 'Needs Improvement'
+    
+    df_engineered['credit_category'] = df_engineered['credit_score'].apply(categorize_credit_score)
+    
+    # Stability score
+    df_engineered['stability_score'] = 0
+    df_engineered.loc[df_engineered['self_employed'] == 'No', 'stability_score'] += 30
+    df_engineered.loc[df_engineered['education'] == 'Graduate', 'stability_score'] += 20
+    df_engineered.loc[df_engineered['no_of_dependents'] <= 2, 'stability_score'] += 10
+    
     return df_engineered
 
-def generate_detailed_recommendations(score, features, applicant_data):
-    # unchanged logic, uses score and features to produce recommendations
+def calculate_matching_score(row):
+    """Calculate matching score (0-100) based on credit profile"""
+    score = 0
+    
+    # 1. Credit Score Component
+    if row['credit_score'] >= 900:
+        score += 40
+    elif row['credit_score'] >= 800:
+        score += 35
+    elif row['credit_score'] >= 700:
+        score += 30
+    elif row['credit_score'] >= 600:
+        score += 20
+    else:
+        score += 10
+    
+    # 2. Monthly Payment Affordability
+    if row['monthly_payment_ratio'] <= 25:
+        score += 25
+    elif row['monthly_payment_ratio'] <= 35:
+        score += 20
+    elif row['monthly_payment_ratio'] <= 45:
+        score += 15
+    elif row['monthly_payment_ratio'] <= 55:
+        score += 10
+    else:
+        score += 5
+    
+    # 3. Asset Security
+    if row['asset_coverage'] >= 250:
+        score += 20
+    elif row['asset_coverage'] >= 175:
+        score += 16
+    elif row['asset_coverage'] >= 125:
+        score += 12
+    elif row['asset_coverage'] >= 75:
+        score += 8
+    else:
+        score += 4
+    
+    # 4. Stability Factors
+    score += min(row['stability_score'], 15)
+    
+    # 5. Risk adjustments
+    if row['self_employed'] == 'Yes' and row['income_annum'] < 30000:
+        score -= 10
+    
+    if row['no_of_dependents'] > 3:
+        score -= 5
+    
+    if row['loan_term'] > 7 and row['loan_amount'] < 150000:
+        score -= 3
+    
+    return min(max(score, 0), 100)
+
+def generate_detailed_recommendations(score, features, applicant_data, prediction):
+    """Generate personalized, actionable credit risk recommendations"""
     recommendations = []
-    credit_score = features.get("credit_score", 0)
+    
+    # Credit Score Analysis
+    credit_score = features.get('credit_score', 0)
     if credit_score >= 800:
         recommendations.append({
             "title": "Excellent Credit Standing",
-            "message": f"Credit score {credit_score} is excellent.",
-            "actions": ["You qualify for highly competitive rates", "Maintain credit utilization below 25%"],
+            "message": f"Credit score of {credit_score} is in the top tier for lending.",
+            "actions": [
+                "Qualify for optimal interest rates",
+                "Maintain credit utilization below 25%",
+                "Continue current payment patterns"
+            ],
             "box_type": "success"
         })
     elif credit_score >= 700:
         recommendations.append({
             "title": "Good Credit Profile",
-            "message": f"Score {credit_score} meets most lender requirements.",
-            "actions": ["Aim for 750+ to reduce rates", "Avoid new credit applications before applying"],
+            "message": f"Score of {credit_score} meets standard lending requirements.",
+            "actions": [
+                "Aim for 750+ to access premium rates",
+                "Review credit report quarterly",
+                "Limit new credit applications"
+            ],
             "box_type": "success"
         })
     elif credit_score >= 600:
         recommendations.append({
             "title": "Credit Improvement Opportunity",
-            "message": f"Score {credit_score} is acceptable but can improve.",
-            "actions": ["Register on electoral roll", "Reduce card balances below 30%"],
+            "message": f"Score of {credit_score} requires attention for optimal terms.",
+            "actions": [
+                "Register on electoral roll if applicable",
+                "Reduce credit card balances below 30%",
+                "Establish consistent payment history"
+            ],
             "box_type": "warning"
         })
     else:
         recommendations.append({
-            "title": "Profile Needs Strengthening",
-            "message": f"Score {credit_score} needs attention prior to application.",
-            "actions": ["Obtain full credit report", "Build 12 months clean history"],
+            "title": "Credit Building Required",
+            "message": f"Score of {credit_score} indicates significant risk factors.",
+            "actions": [
+                "Obtain comprehensive credit reports",
+                "Address any delinquencies immediately",
+                "Build 12-month positive payment history"
+            ],
             "box_type": "warning"
         })
-
-    payment_ratio = features.get("monthly_payment_ratio", 0)
-    monthly_payment = applicant_data["loan_amount"] / (applicant_data["loan_term"] * 12)
+    
+    # Payment Affordability Analysis
+    payment_ratio = features.get('monthly_payment_ratio', 0)
+    monthly_payment = applicant_data['loan_amount'] / (applicant_data['loan_term'] * 12)
+    
     if payment_ratio <= 30:
         recommendations.append({
             "title": "Strong Payment Capacity",
-            "message": f"Monthly payment £{monthly_payment:.0f} is {payment_ratio:.1f}% of income.",
-            "actions": ["Consider shorter terms to reduce interest"],
+            "message": f"Monthly payment of £{monthly_payment:.0f} represents {payment_ratio:.1f}% of income.",
+            "actions": [
+                "Maintain current debt-to-income ratio",
+                "Consider shorter terms for interest savings",
+                "Monitor changes in income stability"
+            ],
             "box_type": "success"
         })
     elif payment_ratio <= 40:
         recommendations.append({
-            "title": "Manageable Payment Load",
-            "message": f"Payment is {payment_ratio:.1f}% of income.",
-            "actions": ["Maintain emergency savings 3-6 months"],
+            "title": "Acceptable Payment Load",
+            "message": f"Payment of £{monthly_payment:.0f} is {payment_ratio:.1f}% of income.",
+            "actions": [
+                "Maintain emergency fund coverage",
+                "Review discretionary expenses quarterly",
+                "Consider longer terms for flexibility"
+            ],
             "box_type": "info"
         })
     else:
         recommendations.append({
-            "title": "High Payment Burden",
-            "message": f"Payment burden {payment_ratio:.1f}% may strain budget.",
-            "actions": ["Reduce loan amount or extend term", "Consider joint application"],
+            "title": "Elevated Payment Burden",
+            "message": f"At {payment_ratio:.1f}% of income, payment capacity is constrained.",
+            "actions": [
+                f"Reduce requested amount by £{applicant_data['loan_amount'] * 0.1:.0f}",
+                "Extend loan term to improve affordability",
+                "Increase income sources or reduce expenses"
+            ],
             "box_type": "warning"
         })
-
-    asset_coverage = features.get("asset_coverage", 0)
-    if asset_coverage >= 200:
+    
+    # Model Prediction Specific Recommendations
+    if prediction == 1:
         recommendations.append({
-            "title": "Exceptional Asset Security",
-            "message": f"Assets cover {asset_coverage:.1f}% of the loan.",
-            "actions": ["You may secure lower interest rates", "Document asset valuations"],
+            "title": "Model Assessment: Low Risk",
+            "message": "Machine learning model identifies low default probability.",
+            "actions": [
+                "Proceed with formal application",
+                "Document all income sources thoroughly",
+                "Prepare 6 months of bank statements"
+            ],
             "box_type": "success"
         })
-    elif asset_coverage >= 125:
-        recommendations.append({
-            "title": "Adequate Asset Coverage",
-            "message": f"Assets cover {asset_coverage:.1f}%.",
-            "actions": ["Include pension statements if available"],
-            "box_type": "info"
-        })
     else:
         recommendations.append({
-            "title": "Asset Coverage Could Improve",
-            "message": f"Asset coverage {asset_coverage:.1f}% is below ideal.",
-            "actions": ["Increase liquid savings", "Consider guarantor options"],
+            "title": "Model Assessment: Elevated Risk",
+            "message": "Model indicates elevated default risk based on profile characteristics.",
+            "actions": [
+                "Review and improve credit profile factors",
+                "Consider reducing requested loan amount",
+                "Provide additional collateral if available"
+            ],
             "box_type": "warning"
         })
-
-    # Score-driven overall recommendation
+    
+    # Overall Score-Based Recommendation
     if score >= 85:
         recommendations.append({
-            "title": "Premium Candidate",
-            "message": f"Matching score {score}/100 – strong approval likelihood.",
-            "actions": ["Apply to multiple lenders to compare offers"],
+            "title": "Premium Credit Profile",
+            "message": f"Matching score of {score}/100 indicates excellent creditworthiness.",
+            "actions": [
+                "Apply to multiple lenders for competitive terms",
+                "Expect accelerated processing timeline",
+                "Document all assets comprehensively"
+            ],
             "box_type": "success"
         })
     elif score >= 70:
         recommendations.append({
-            "title": "Strong Candidate",
-            "message": f"Matching score {score}/100 – high approval likelihood.",
-            "actions": ["Complete full application with documentation"],
+            "title": "Strong Credit Position",
+            "message": f"Score of {score}/100 suggests high approval probability.",
+            "actions": [
+                "Complete application with full documentation",
+                "Apply to primary lending institutions",
+                "Maintain current financial position"
+            ],
             "box_type": "success"
         })
     elif score >= 55:
         recommendations.append({
-            "title": "Borderline Candidate",
-            "message": f"Score {score}/100 – prepare additional documentation.",
-            "actions": ["Include employer letters, consider co-signer"],
+            "title": "Borderline Credit Profile",
+            "message": f"Score of {score}/100 requires enhanced documentation.",
+            "actions": [
+                "Provide detailed income verification",
+                "Include employment stability documentation",
+                "Consider additional co-signers if applicable"
+            ],
             "box_type": "warning"
         })
     else:
         recommendations.append({
-            "title": "Needs Improvement",
-            "message": f"Score {score}/100 – consider strengthening profile before applying.",
-            "actions": ["Improve credit, increase savings"],
+            "title": "Profile Requires Strengthening",
+            "message": f"Score of {score}/100 indicates significant improvement needed.",
+            "actions": [
+                "Focus on credit score improvement for 6-12 months",
+                "Increase liquid asset position",
+                "Consult with financial advisory services"
+            ],
             "box_type": "warning"
         })
-
+    
     return recommendations
 
 def generate_shap_explanation(model, X_input, feature_names):
+    """Generate SHAP-based explanation for model decision"""
     try:
-        # Use SHAP's generic Explainer for compatibility
-        explainer = shap.Explainer(model, feature_names=feature_names)
-        shap_values = explainer(X_input)
-        # shap_values.values shape: (n_samples, n_features) for regression or multiclass, handle appropriately
-        values = shap_values.values
-        # For binary classification shap.Explainer may return shape (n_samples, n_features) for the single output
-        impact = np.abs(values).mean(axis=0)
+        # Create SHAP explainer
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(X_input)
+        
+        # For binary classification
+        if isinstance(shap_values, list):
+            shap_values = shap_values[1]
+        
+        # Get feature importance
+        feature_importance = np.abs(shap_values).mean(0)
         feature_df = pd.DataFrame({
-            "Feature": feature_names,
-            "Impact": impact
-        }).sort_values("Impact", ascending=False).head(10)
+            'Feature': feature_names,
+            'Impact': feature_importance[0] if len(feature_importance.shape) > 1 else feature_importance
+        }).sort_values('Impact', ascending=False).head(10)
+        
         return feature_df
     except Exception as e:
-        st.warning(f"SHAP explanation not available: {e}")
+        st.error(f"SHAP explanation error: {str(e)}")
         return None
+
+# ---------------------------------------------------------
+# WORD DOCUMENT REPORT GENERATION
+# ---------------------------------------------------------
+def save_plotly_fig(fig, filename):
+    """Save Plotly figure as image"""
+    img_bytes = pio.to_image(fig, format='png', width=600, height=400)
+    with open(filename, 'wb') as f:
+        f.write(img_bytes)
+    return filename
+
+def create_word_report(applicant_data, results, features, shap_data):
+    """Generate comprehensive Word document report"""
+    doc = Document()
+    
+    # Title
+    title = doc.add_heading('Credit Risk Assessment Report', 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Date
+    date_para = doc.add_paragraph()
+    date_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    date_run = date_para.add_run(f'Generated: {datetime.now().strftime("%d %B %Y at %H:%M")}')
+    date_run.italic = True
+    
+    doc.add_paragraph()
+    
+    # Applicant Information Section
+    doc.add_heading('Applicant Information', level=1)
+    
+    info_table = doc.add_table(rows=7, cols=2)
+    info_table.style = 'LightShading-Accent1'
+    
+    rows = [
+        ("Credit Score:", str(applicant_data['credit_score'])),
+        ("Annual Income:", f"£{applicant_data['income_annum']:,}"),
+        ("Loan Amount:", f"£{applicant_data['loan_amount']:,}"),
+        ("Loan Term:", f"{applicant_data['loan_term']} years"),
+        ("Employment:", applicant_data['self_employed']),
+        ("Education:", applicant_data['education']),
+        ("Total Assets:", f"£{applicant_data['total_assets']:,}")
+    ]
+    
+    for i, (label, value) in enumerate(rows):
+        info_table.cell(i, 0).text = label
+        info_table.cell(i, 1).text = value
+    
+    doc.add_paragraph()
+    
+    # Assessment Results
+    doc.add_heading('Assessment Results', level=1)
+    
+    results_table = doc.add_table(rows=3, cols=2)
+    results_table.style = 'LightShading-Accent1'
+    
+    results_rows = [
+        ("Matching Score:", f"{results['matching_score']}/100"),
+        ("Approval Probability:", f"{results['approval_probability']:.1f}%"),
+        ("Risk Assessment:", results['status'])
+    ]
+    
+    for i, (label, value) in enumerate(results_rows):
+        results_table.cell(i, 0).text = label
+        results_table.cell(i, 1).text = value
+    
+    doc.add_paragraph()
+    
+    # Financial Health Metrics
+    doc.add_heading('Financial Health Metrics', level=1)
+    
+    metrics_table = doc.add_table(rows=4, cols=2)
+    metrics_table.style = 'LightShading-Accent1'
+    
+    metrics_rows = [
+        ("Monthly Payment Ratio:", f"{features['monthly_payment_ratio']:.1f}%"),
+        ("Asset Coverage:", f"{features['asset_coverage']:.1f}%"),
+        ("Credit Category:", features['credit_category']),
+        ("Stability Score:", f"{features['stability_score']}/45")
+    ]
+    
+    for i, (label, value) in enumerate(metrics_rows):
+        metrics_table.cell(i, 0).text = label
+        metrics_table.cell(i, 1).text = value
+    
+    doc.add_page_break()
+    
+    # Charts Section
+    doc.add_heading('Visual Analysis', level=1)
+    
+    # Gauge Chart
+    doc.add_heading('Matching Score Gauge', level=2)
+    gauge_fig = create_score_gauge(results['matching_score'])
+    gauge_file = save_plotly_fig(gauge_fig, 'gauge_chart.png')
+    doc.add_picture(gauge_file, width=Inches(6))
+    doc.add_paragraph(f"Score Interpretation: {results['status']}")
+    
+    doc.add_paragraph()
+    
+    # Radar Chart
+    doc.add_heading('Financial Health Radar', level=2)
+    radar_fig = create_feature_radar(features)
+    radar_file = save_plotly_fig(radar_fig, 'radar_chart.png')
+    doc.add_picture(radar_file, width=Inches(6))
+    
+    doc.add_paragraph()
+    
+    # SHAP Chart
+    if shap_data is not None and not shap_data.empty:
+        doc.add_heading('Decision Factors Analysis', level=2)
+        shap_fig = create_shap_chart(shap_data)
+        if shap_fig:
+            shap_file = save_plotly_fig(shap_fig, 'shap_chart.png')
+            doc.add_picture(shap_file, width=Inches(6))
+            
+            # Add SHAP explanation
+            doc.add_paragraph()
+            doc.add_heading('Top Decision Factors', level=3)
+            shap_table = doc.add_table(rows=min(6, len(shap_data))+1, cols=2)
+            shap_table.style = 'LightShading-Accent1'
+            shap_table.cell(0, 0).text = "Feature"
+            shap_table.cell(0, 1).text = "Impact Score"
+            
+            for i, row in shap_data.head(6).iterrows():
+                shap_table.cell(i+1, 0).text = row['Feature'].replace('_', ' ').title()
+                shap_table.cell(i+1, 1).text = f"{row['Impact']:.4f}"
+    
+    doc.add_page_break()
+    
+    # Recommendations Section
+    doc.add_heading('Credit Risk Recommendations', level=1)
+    
+    for i, rec in enumerate(results['recommendations'][:5], 1):
+        doc.add_heading(f"{i}. {rec['title']}", level=2)
+        doc.add_paragraph(rec['message'])
+        
+        if rec['actions']:
+            doc.add_heading("Recommended Actions:", level=3)
+            for action in rec['actions']:
+                para = doc.add_paragraph(style='ListBullet')
+                para.add_run(action)
+        
+        doc.add_paragraph()
+    
+    # Credit Management Advice
+    doc.add_heading('Credit Management Guidance', level=1)
+    
+    advice_items = [
+        "Maintain credit utilization below 30% of available limits",
+        "Ensure all payments are made on time, every time",
+        "Regularly review credit reports for inaccuracies",
+        "Avoid multiple credit applications within short periods",
+        "Build and maintain emergency savings equivalent to 3-6 months of expenses",
+        "Diversify credit types responsibly over time",
+        "Monitor debt-to-income ratio monthly",
+        "Establish long-term banking relationships"
+    ]
+    
+    for item in advice_items:
+        para = doc.add_paragraph(style='ListBullet')
+        para.add_run(item)
+    
+    doc.add_paragraph()
+    
+    # Disclaimer
+    disclaimer = doc.add_paragraph()
+    disclaimer_run = disclaimer.add_run('Disclaimer')
+    disclaimer_run.bold = True
+    
+    doc.add_paragraph("""This assessment is generated by machine learning models and provides preliminary risk evaluation only. 
+    Final credit decisions are made by individual lending institutions based on comprehensive underwriting criteria. 
+    This report does not constitute a loan offer or guarantee of credit approval. 
+    All financial decisions should be made in consultation with qualified financial advisors.""")
+    
+    # Save to BytesIO
+    doc_bytes = io.BytesIO()
+    doc.save(doc_bytes)
+    doc_bytes.seek(0)
+    
+    return doc_bytes
 
 # ---------------------------------------------------------
 # VISUALIZATION FUNCTIONS
 # ---------------------------------------------------------
 def create_score_gauge(score):
-    colors = ["#EF4444", "#F59E0B", "#10B981", "#047857"]
+    """Create a professional gauge chart for matching score"""
+    colors = ['#ef5350', '#ff9800', '#4caf50', '#2e7d32']
+    
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=score,
-        domain={"x": [0, 1], "y": [0, 1]},
-        title={"text": "Profile Match Score", "font": {"size": 16}},
+        domain={'x': [0, 1], 'y': [0, 1]},
+        title={'text': "Credit Profile Score", 'font': {'size': 18}},
         gauge={
-            "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "darkgray"},
-            "bar": {"color": "#3B82F6"},
-            "steps": [
-                {"range": [0, 50], "color": colors[0]},
-                {"range": [50, 70], "color": colors[1]},
-                {"range": [70, 85], "color": colors[2]},
-                {"range": [85, 100], "color": colors[3]}
+            'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "#37474f"},
+            'bar': {'color': "#1a237e"},
+            'bgcolor': "rgba(0,0,0,0)",
+            'borderwidth': 2,
+            'bordercolor': "#546e7a",
+            'steps': [
+                {'range': [0, 50], 'color': colors[0]},
+                {'range': [50, 70], 'color': colors[1]},
+                {'range': [70, 85], 'color': colors[2]},
+                {'range': [85, 100], 'color': colors[3]}
             ],
-            "threshold": {"line": {"color": "black", "width": 3}, "value": 70}
+            'threshold': {
+                'line': {'color': "#000000", 'width': 3},
+                'thickness': 0.85,
+                'value': 70
+            }
         }
     ))
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=300, margin=dict(l=20, r=20, t=40, b=20))
+    
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#263238', family="Arial"),
+        height=300,
+        margin=dict(l=30, r=30, t=50, b=30)
+    )
+    
     return fig
 
 def create_feature_radar(features):
-    categories = ["Credit Score", "Affordability", "Asset Security", "Stability"]
+    """Create radar chart for financial health metrics"""
+    categories = ['Credit Score', 'Affordability', 'Asset Security', 'Stability']
     values = [
-        min(100, features["credit_score"] / 9.99),
-        100 - min(100, features["monthly_payment_ratio"]),
-        min(100, features["asset_coverage"] / 2.5),
-        min(100, features["stability_score"] / 45 * 100)
+        min(100, features['credit_score'] / 9.99),
+        100 - min(100, features['monthly_payment_ratio']),
+        min(100, features['asset_coverage'] / 2.5),
+        min(100, features['stability_score'] / 45 * 100)
     ]
+    
     fig = go.Figure(data=go.Scatterpolar(
         r=values + [values[0]],
         theta=categories + [categories[0]],
-        fill="toself",
-        fillcolor="rgba(59,130,246,0.25)",
-        line_color="rgb(59,130,246)",
+        fill='toself',
+        fillcolor='rgba(26, 35, 126, 0.2)',
+        line_color='rgb(26, 35, 126)',
         line_width=2
     ))
-    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), paper_bgcolor="rgba(0,0,0,0)", height=300, margin=dict(l=30, r=30, t=30, b=20))
+    
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 100],
+                gridcolor='rgba(96, 125, 139, 0.3)',
+                linecolor='#546e7a'
+            ),
+            angularaxis=dict(
+                gridcolor='rgba(96, 125, 139, 0.3)',
+                linecolor='#546e7a'
+            ),
+            bgcolor='rgba(0,0,0,0)'
+        ),
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#263238'),
+        showlegend=False,
+        height=300,
+        margin=dict(l=50, r=50, t=30, b=30)
+    )
+    
     return fig
 
 def create_shap_chart(shap_data):
+    """Create horizontal bar chart for SHAP feature importance"""
     if shap_data is None or shap_data.empty:
         return None
-    plot_data = shap_data.head(8).sort_values("Impact", ascending=True)
+    
+    plot_data = shap_data.head(8).sort_values('Impact', ascending=True)
+    
     fig = go.Figure(go.Bar(
-        x=plot_data["Impact"],
-        y=plot_data["Feature"].str.replace("_", " ").str.title(),
-        orientation="h",
-        text=plot_data["Impact"].round(4),
-        textposition="outside"
+        x=plot_data['Impact'],
+        y=plot_data['Feature'].str.replace('_', ' ').str.title(),
+        orientation='h',
+        marker_color='#1a237e',
+        text=plot_data['Impact'].round(4),
+        textposition='outside'
     ))
-    fig.update_layout(title="Top Decision Factors", xaxis_title="Impact on Decision", paper_bgcolor="rgba(0,0,0,0)", height=300, margin=dict(l=120, r=20, t=40, b=20))
+    
+    fig.update_layout(
+        title='Feature Impact Analysis',
+        xaxis_title='Impact Magnitude',
+        yaxis_title='Risk Factors',
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#263238'),
+        height=300,
+        margin=dict(l=150, r=20, t=40, b=20)
+    )
+    
     return fig
-
-# ---------------------------------------------------------
-# WORD REPORT GENERATION
-# ---------------------------------------------------------
-def create_word_report(applicant_data, results, features, gauge_fig, radar_fig, shap_fig=None):
-    doc = Document()
-    doc.add_heading("UK Loan Pre-Approval Report", level=1)
-    doc.add_paragraph(f"Generated: {datetime.now().strftime('%d %B %Y at %H:%M')}")
-    doc.add_paragraph("")  # spacing
-
-    # Applicant info
-    doc.add_heading("Applicant Information", level=2)
-    info_table = doc.add_table(rows=0, cols=2)
-    for k, v in applicant_data.items():
-        row = info_table.add_row().cells
-        row[0].text = str(k).replace("_", " ").title()
-        row[1].text = str(v)
-
-    # Assessment results
-    doc.add_heading("Assessment Results", level=2)
-    doc.add_paragraph(f"Matching Score: {results['matching_score']}/100")
-    doc.add_paragraph(f"Approval Probability: {results['approval_probability']:.1f}%")
-    doc.add_paragraph(f"Status: {results['status']}")
-
-    # Financial metrics
-    doc.add_heading("Financial Health Metrics", level=2)
-    metrics_table = doc.add_table(rows=0, cols=2)
-    metrics_table.add_row().cells[0].text = "Monthly Payment Ratio"
-    metrics_table.add_row().cells[1].text = f"{features['monthly_payment_ratio']:.1f}%"
-    metrics_table.add_row().cells[0].text = "Asset Coverage"
-    metrics_table.add_row().cells[1].text = f"{features['asset_coverage']:.1f}%"
-
-    # Insert charts as images (use Plotly + kaleido -> bytes)
-    try:
-        # Gauge
-        gauge_png = gauge_fig.to_image(format="png", engine="kaleido")
-        doc.add_heading("Matching Score (Gauge)", level=2)
-        doc.add_picture(BytesIO(gauge_png), width=Inches(6))
-
-        # Radar
-        radar_png = radar_fig.to_image(format="png", engine="kaleido")
-        doc.add_heading("Financial Health Radar", level=2)
-        doc.add_picture(BytesIO(radar_png), width=Inches(6))
-
-        # SHAP
-        if shap_fig is not None:
-            shap_png = shap_fig.to_image(format="png", engine="kaleido")
-            doc.add_heading("SHAP: Top Decision Factors", level=2)
-            doc.add_picture(BytesIO(shap_png), width=Inches(6))
-    except Exception as e:
-        # If chart export fails, add a note (user must have kaleido available in runtime).
-        doc.add_paragraph("Note: Chart images could not be embedded due to server configuration: " + str(e))
-
-    # Recommendations
-    doc.add_heading("Personalized Recommendations", level=2)
-    for rec in results["recommendations"]:
-        doc.add_paragraph(rec["title"], style="List Bullet")
-        doc.add_paragraph(rec["message"])
-        if rec.get("actions"):
-            for action in rec["actions"]:
-                doc.add_paragraph(action, style="List Number")
-
-    # Footer / disclaimer
-    doc.add_paragraph("")
-    doc.add_paragraph("Disclaimer: This is a preliminary assessment based on the information provided. Final loan approval is subject to documentation and lender policies.")
-    doc.add_paragraph("© 2026 Smart Solution to tough data")
-
-    # Save to bytes
-    bio = BytesIO()
-    doc.save(bio)
-    bio.seek(0)
-    return bio.read()
 
 # ---------------------------------------------------------
 # MAIN APPLICATION
 # ---------------------------------------------------------
 def main():
-    st.markdown('<h1 class="main-header">UK Smart Loan Advisor</h1>', unsafe_allow_html=True)
-    st.markdown('<div class="tip-box"><strong>Transparent Loan Assessment:</strong> This tool provides a preliminary assessment based on UK lending criteria. Final approval requires full documentation and verification by a lender.</div>', unsafe_allow_html=True)
-
-    # Sidebar input
+    # Header
+    st.markdown('<h1 class="main-header">Credit Risk Assessment System</h1>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="info-container">
+    <strong>Professional Risk Evaluation:</strong> This system provides data-driven credit risk assessment using machine learning models. 
+    All evaluations are based on UK lending standards and risk management principles.
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Sidebar for inputs
     with st.sidebar:
-        st.markdown('<h3 class="sub-header">Your Information</h3>', unsafe_allow_html=True)
-        credit_score = st.slider("Credit Score (0-999)", 0, 999, 750)
-        income_annum = st.number_input("Annual Income (£)", min_value=0, value=35000, step=1000)
-        loan_amount = st.number_input("Loan Amount Needed (£)", min_value=1000, value=25000, step=1000)
-        loan_term = st.slider("Loan Term (Years)", 1, 30, 5)
-        no_of_dependents = st.selectbox("Number of Dependents", options=[0, 1, 2, 3, 4, 5], index=1)
-        self_employed = st.radio("Employment Type", ["Employed", "Self-Employed"])
-        education = st.radio("Education Level", ["Graduate", "Not Graduate"])
-        total_assets = st.number_input("Total Assets Value (£)", min_value=0, value=50000, step=1000)
-
+        st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
+        st.markdown('<h3>Application Information</h3>', unsafe_allow_html=True)
+        
+        # Personal Information
+        st.subheader("Personal Details")
+        credit_score = st.slider(
+            "Credit Score (UK Scale)",
+            min_value=0,
+            max_value=999,
+            value=750,
+            help="UK credit scores range from 0-999"
+        )
+        
+        income_annum = st.number_input(
+            "Annual Income (£)",
+            min_value=15000,
+            value=35000,
+            step=5000,
+            help="Gross annual income before tax"
+        )
+        
+        loan_amount = st.number_input(
+            "Loan Amount (£)",
+            min_value=5000,
+            value=25000,
+            step=5000,
+            help="Total borrowing requirement"
+        )
+        
+        loan_term = st.slider(
+            "Loan Term (Years)",
+            min_value=1,
+            max_value=30,
+            value=5,
+            help="Repayment period in years"
+        )
+        
+        no_of_dependents = st.selectbox(
+            "Number of Dependents",
+            options=[0, 1, 2, 3, 4, "5 or more"],
+            index=1
+        )
+        
+        # Employment & Education
+        col1, col2 = st.columns(2)
+        with col1:
+            self_employed = st.radio(
+                "Employment Type",
+                ["Employed", "Self-Employed"]
+            )
+        with col2:
+            education = st.radio(
+                "Education Level",
+                ["Graduate", "Not Graduate"]
+            )
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Asset Information
+        st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
+        st.markdown('<h3>Asset Information</h3>', unsafe_allow_html=True)
+        
+        total_assets = st.number_input(
+            "Total Assets Value (£)",
+            min_value=0,
+            value=50000,
+            step=10000,
+            help="Combined value of all assets"
+        )
+        
+        if st.checkbox("View asset allocation model"):
+            st.info("""
+            **Standard Asset Allocation:**
+            - Residential Assets: 50%
+            - Commercial Assets: 25%
+            - Luxury Assets: 15%
+            - Bank Assets: 10%
+            """)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
         # Rate limiting
         current_time = time.time()
         time_since_last = current_time - st.session_state.last_submission
+        
         if time_since_last < 3 and st.session_state.results is not None:
-            st.warning(f"Please wait {3 - time_since_last:.1f} seconds")
+            remaining = 3 - time_since_last
+            st.warning(f"Assessment cooling period: {remaining:.1f} seconds")
             calculate_disabled = True
         else:
             calculate_disabled = False
-
-        calculate_btn = st.button("Check Eligibility", disabled=calculate_disabled, use_container_width=True)
-
-    # Load model before computation and abort if missing (no fallback)
-    model = None
-    feature_columns = None
-    model_load_error = None
-    try:
-        model = joblib.load("best_xgb_model.pkl")
-        feature_columns = joblib.load("feature_columns.pkl")
-    except Exception as e:
-        model_load_error = e
-
+        
+        # Calculate Button
+        calculate_btn = st.button(
+            "Execute Risk Assessment",
+            type="primary",
+            disabled=calculate_disabled,
+            use_container_width=True
+        )
+    
+    # Main Content Area
     if calculate_btn:
+        # Update last submission time
         st.session_state.last_submission = time.time()
-
-        if model_load_error is not None:
-            st.error(f"Model load error: {model_load_error}")
-            st.error("A trained model file (best_xgb_model.pkl and feature_columns.pkl) is required. Place these files in the app directory and retry.")
-            st.stop()
-
-        # Prepare model input (scale consistent with training)
+        
+        # Validate inputs
+        validation_errors = []
+        if loan_term > 30:
+            validation_errors.append("Maximum loan term is 30 years")
+        if income_annum <= 0:
+            validation_errors.append("Annual income must be positive")
+        if not (0 <= credit_score <= 999):
+            validation_errors.append("Credit score must be between 0-999")
+        
+        if validation_errors:
+            for error in validation_errors:
+                st.error(f"Validation Error: {error}")
+            return
+        
+        # Asset allocation
+        ASSET_ALLOCATION = {
+            "residential_assets_value": 0.50,
+            "commercial_assets_value": 0.25,
+            "luxury_assets_value": 0.15,
+            "bank_asset_value": 0.10
+        }
+        
+        # Convert to model scale
+        residential_assets = int((total_assets * ASSET_ALLOCATION['residential_assets_value']) * CONVERSION_RATE)
+        commercial_assets = int((total_assets * ASSET_ALLOCATION['commercial_assets_value']) * CONVERSION_RATE)
+        luxury_assets = int((total_assets * ASSET_ALLOCATION['luxury_assets_value']) * CONVERSION_RATE)
+        bank_assets = int((total_assets * ASSET_ALLOCATION['bank_asset_value']) * CONVERSION_RATE)
+        
+        # Prepare input data
         model_input_data = {
             "credit_score": credit_score,
             "income_annum": int(income_annum * CONVERSION_RATE),
             "loan_amount": int(loan_amount * CONVERSION_RATE),
             "loan_term": loan_term,
-            "no_of_dependents": int(no_of_dependents),
+            "no_of_dependents": no_of_dependents if isinstance(no_of_dependents, int) else 5,
             "self_employed": "Yes" if self_employed == "Self-Employed" else "No",
             "education": education,
+            "residential_assets_value": residential_assets,
+            "commercial_assets_value": commercial_assets,
+            "luxury_assets_value": luxury_assets,
+            "bank_asset_value": bank_assets,
             "total_assets": int(total_assets * CONVERSION_RATE)
         }
-        df_input = pd.DataFrame([model_input_data])
-        df_features = create_credit_features(df_input)
-
-        # Prepare features for model (one-hot + align)
-        X_input = df_input.drop(columns=["total_assets"])
-        X_input = pd.get_dummies(X_input)
-        X_input = X_input.reindex(columns=feature_columns, fill_value=0)
-
-        # Model prediction (probability -> approval_probability)
-        try:
-            approval_probability = model.predict_proba(X_input)[0, 1] * 100
-            prediction = int(model.predict(X_input)[0])
-            matching_score = int(round(approval_probability))
-        except Exception as e:
-            st.error(f"Model prediction error: {e}")
-            st.stop()
-
-        shap_data = generate_shap_explanation(model, X_input, X_input.columns.tolist())
-
-        # Generate recommendations using matching_score (model-driven)
-        recommendations = generate_detailed_recommendations(matching_score, df_features.iloc[0].to_dict(), {
+        
+        # Display data
+        uk_display_data = {
             "credit_score": credit_score,
             "income_annum": income_annum,
             "loan_amount": loan_amount,
             "loan_term": loan_term,
-            "no_of_dependents": int(no_of_dependents),
+            "no_of_dependents": no_of_dependents if isinstance(no_of_dependents, int) else 5,
             "self_employed": self_employed,
             "education": education,
             "total_assets": total_assets
-        })
-
+        }
+        
+        # Create DataFrame for model
+        df_input = pd.DataFrame([model_input_data])
+        
+        # Feature engineering
+        df_features = create_credit_features(df_input)
+        
+        # Calculate matching score
+        matching_score = calculate_matching_score(df_features.iloc[0])
+        
+        # Load model and predict - NO FALLBACK
+        try:
+            model = joblib.load("best_xgb_model.pkl")
+            feature_columns = joblib.load("feature_columns.pkl")
+            
+            # Prepare features for model
+            X_input = df_input.drop(columns=['total_assets'])
+            X_input = pd.get_dummies(X_input)
+            X_input = X_input.reindex(columns=feature_columns, fill_value=0)
+            
+            # Get prediction
+            approval_probability = model.predict_proba(X_input)[0, 1] * 100
+            prediction = model.predict(X_input)[0]
+            
+            # Generate SHAP explanation
+            shap_data = generate_shap_explanation(model, X_input, feature_columns)
+            
+        except FileNotFoundError as e:
+            st.error(f"Model file not found: {e}")
+            st.stop()
+        except Exception as e:
+            st.error(f"Model execution error: {str(e)}")
+            st.stop()
+        
+        # Generate detailed recommendations
+        recommendations = generate_detailed_recommendations(
+            matching_score, 
+            df_features.iloc[0].to_dict(),
+            uk_display_data,
+            prediction
+        )
+        
         # Determine status
         if matching_score >= 80:
-            status = "Excellent Match"
+            status = "Low Risk Profile"
             status_box = "success"
         elif matching_score >= 65:
-            status = "Good Match"
+            status = "Moderate Risk Profile"
             status_box = "success"
         elif matching_score >= 50:
-            status = "Needs Review"
+            status = "Elevated Risk Profile"
             status_box = "warning"
         else:
-            status = "Needs Improvement"
+            status = "High Risk Profile"
             status_box = "warning"
-
+        
         # Store results
         st.session_state.results = {
-            "matching_score": matching_score,
-            "approval_probability": approval_probability,
-            "prediction": prediction,
-            "status": status,
-            "status_box": status_box,
-            "recommendations": recommendations,
-            "applicant_data": {
-                "credit_score": credit_score,
-                "income_annum": income_annum,
-                "loan_amount": loan_amount,
-                "loan_term": loan_term,
-                "no_of_dependents": int(no_of_dependents),
-                "self_employed": self_employed,
-                "education": education,
-                "total_assets": total_assets
-            },
-            "features": df_features.iloc[0].to_dict(),
-            "shap_data": shap_data
+            'matching_score': matching_score,
+            'approval_probability': approval_probability,
+            'prediction': prediction,
+            'status': status,
+            'status_box': status_box,
+            'recommendations': recommendations,
+            'applicant_data': uk_display_data,
+            'features': df_features.iloc[0].to_dict(),
+            'shap_data': shap_data
         }
-
-    # Display results area
+    
+    # Display results if available
     if st.session_state.results:
         results = st.session_state.results
-        st.markdown('<h2 class="sub-header">Eligibility Report</h2>', unsafe_allow_html=True)
+        
+        # Results Header
+        st.markdown('<h2 class="sub-header">Risk Assessment Report</h2>', unsafe_allow_html=True)
+        
+        # Key Metrics
         col1, col2, col3, col4 = st.columns(4)
+        
         with col1:
-            st.metric(label="Profile Match", value=f"{results['matching_score']}/100", delta=results["status"])
+            st.metric(
+                label="Profile Score",
+                value=f"{results['matching_score']}/100",
+                delta=results['status']
+            )
+        
         with col2:
-            st.metric(label="Approval Chance", value=f"{results['approval_probability']:.1f}%")
+            st.metric(
+                label="Approval Probability",
+                value=f"{results['approval_probability']:.1f}%"
+            )
+        
         with col3:
-            st.metric(label="Next Action", value="Apply Now" if results["matching_score"] >= 65 else "Improve First")
+            decision = "Approve" if results['prediction'] == 1 else "Review"
+            st.metric(
+                label="Model Decision",
+                value=decision
+            )
+        
         with col4:
-            processing_time = "2-4 Days" if results["matching_score"] >= 70 else ("5-10 Days" if results["matching_score"] >= 50 else "Manual Review")
-            st.metric(label="Processing Time", value=processing_time)
-
+            if results['matching_score'] >= 70:
+                time_value = "Standard"
+            elif results['matching_score'] >= 50:
+                time_value = "Extended"
+            else:
+                time_value = "Manual"
+            st.metric(
+                label="Processing",
+                value=time_value
+            )
+        
         # Charts
         col1, col2 = st.columns(2)
-        gauge_fig = create_score_gauge(results["matching_score"])
-        radar_fig = create_feature_radar(results["features"])
+        
         with col1:
-            st.plotly_chart(gauge_fig, use_container_width=True)
+            st.plotly_chart(create_score_gauge(results['matching_score']), use_container_width=True)
+        
         with col2:
-            st.plotly_chart(radar_fig, use_container_width=True)
-
-        # SHAP chart
-        shap_fig = None
-        if results.get("shap_data") is not None:
-            shap_fig = create_shap_chart(results["shap_data"])
-            if shap_fig is not None:
-                st.plotly_chart(shap_fig, use_container_width=True)
-
-        # Recommendations
-        st.markdown('<h3 class="sub-header">Action Plan</h3>', unsafe_allow_html=True)
-        for i, rec in enumerate(results["recommendations"][:6]):
-            box_style = "success-box" if rec["box_type"] == "success" else ("warning-box" if rec["box_type"] == "warning" else "info-box")
-            with st.expander(rec["title"], expanded=(i < 2)):
-                st.markdown(f"<div class='{box_style}'>", unsafe_allow_html=True)
-                st.write(rec["message"])
-                if rec.get("actions"):
-                    for action in rec["actions"]:
-                        st.write(f"• {action}")
-                st.markdown("</div>", unsafe_allow_html=True)
-
-        # Word report generation + download
-        st.markdown('<h3 class="sub-header">Download Full Report</h3>', unsafe_allow_html=True)
-        try:
-            word_bytes = create_word_report(results["applicant_data"], results, results["features"], gauge_fig, radar_fig, shap_fig)
-            st.download_button(
-                label="Download Word Report",
-                data=word_bytes,
-                file_name=f"Loan_Assessment_{datetime.now().strftime('%Y%m%d')}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            st.plotly_chart(create_feature_radar(results['features']), use_container_width=True)
+        
+        # SHAP Explanation Chart
+        if results.get('shap_data') is not None:
+            shap_chart = create_shap_chart(results['shap_data'])
+            if shap_chart:
+                st.plotly_chart(shap_chart, use_container_width=True)
+        
+        # Financial Health Indicators
+        st.markdown('<h3 class="sub-header">Financial Health Metrics</h3>', unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            payment_ratio = results['features']['monthly_payment_ratio']
+            st.write("**Payment Affordability**")
+            progress_value = max(0.0, min(1.0, (35 - min(payment_ratio, 35)) / 35))
+            st.progress(
+                progress_value,
+                text=f"{payment_ratio:.1f}% of income"
             )
-        except Exception as e:
-            st.error(f"Could not generate Word report: {e}")
+            st.caption("Target: ≤35% of monthly income")
+        
+        with col2:
+            asset_coverage = results['features']['asset_coverage']
+            st.write("**Asset Coverage**")
+            progress_value = min(1.0, asset_coverage / 250)
+            st.progress(
+                progress_value,
+                text=f"{asset_coverage:.1f}% coverage"
+            )
+            st.caption("Ideal: ≥125% of loan amount")
+        
+        with col3:
+            stability = results['features']['stability_score']
+            st.write("**Stability Score**")
+            progress_value = min(1.0, stability / 60)
+            st.progress(
+                progress_value,
+                text=f"{stability}/60 points"
+            )
+            st.caption("Employment, education, dependents")
+        
+        # Risk Recommendations
+        st.markdown('<h3 class="sub-header">Risk Mitigation Recommendations</h3>', unsafe_allow_html=True)
+        
+        for i, rec in enumerate(results['recommendations'][:5]):
+            if rec['box_type'] == "success":
+                box_class = "success-container"
+            elif rec['box_type'] == "warning":
+                box_class = "warning-container"
+            else:
+                box_class = "info-container"
+            
+            with st.expander(f"{rec['title']}", expanded=i<2):
+                st.markdown(f"<div class='{box_class}'>", unsafe_allow_html=True)
+                st.write(f"**{rec['message']}**")
+                st.write("")
+                st.write("**Action Items:**")
+                for action in rec['actions']:
+                    st.write(f"• {action}")
+                st.markdown("</div>", unsafe_allow_html=True)
+        
+        # Word Document Generation
+        st.markdown('<h3 class="sub-header">Download Assessment Report</h3>', unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            st.info("Generate a comprehensive Word document containing all assessment details, visualizations, and credit management recommendations.")
+        
+        with col2:
+            try:
+                doc_bytes = create_word_report(
+                    results['applicant_data'],
+                    results,
+                    results['features'],
+                    results.get('shap_data')
+                )
+                
+                b64 = base64.b64encode(doc_bytes.getvalue()).decode()
+                current_date = datetime.now().strftime("%Y%m%d")
+                href = f'<a href="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64}" download="Credit_Assessment_{current_date}.docx" style="background-color: #1a237e; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600;">Download Word Report</a>'
+                st.markdown(href, unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Report generation failed: {str(e)}")
+    
     else:
-        # Welcome/instructions screen
-        st.markdown(
-            """
-            <h3 class="sub-header">How It Works</h3>
-            <div>
-                <ol>
-                    <li>Enter your financial profile in the sidebar.</li>
-                    <li>Click "Check Eligibility" to evaluate using the trained ML model.</li>
-                    <li>Download a Word report with charts and recommendations.</li>
-                </ol>
+        # Welcome screen
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.markdown("""
+            ### Assessment Methodology
+            
+            **1. Data Collection**
+            Comprehensive collection of financial and personal information using standardized input forms.
+            
+            **2. Machine Learning Analysis**
+            Advanced XGBoost model processes 12+ risk factors using historical lending data.
+            
+            **3. Risk Scoring**
+            Generation of 0-100 risk score based on creditworthiness assessment.
+            
+            **4. SHAP Explanation**
+            Transparent explanation of model decisions using Shapley values.
+            
+            **5. Actionable Reporting**
+            Detailed recommendations and professional documentation.
+            
+            ### Risk Assessment Framework
+            
+            • **Credit History**: Analysis of credit score and payment patterns  
+            • **Payment Capacity**: Evaluation of debt-to-income ratios  
+            • **Asset Security**: Assessment of collateral and liquid assets  
+            • **Employment Stability**: Review of income consistency and source  
+            • **Demographic Factors**: Consideration of education and dependents  
+            
+            ### System Capabilities
+            
+            • **Predictive Accuracy**: Machine learning model trained on historical data  
+            • **Transparent Decisions**: SHAP-based feature importance explanations  
+            • **Professional Reporting**: Comprehensive Word document generation  
+            • **Real-time Processing**: Instant assessment with rate limiting  
+            • **UK Compliance**: Adherence to UK lending standards and regulations  
+            """)
+        
+        with col2:
+            st.markdown("""
+            <div class="info-container">
+            <h4>UK Credit Standards</h4>
+            <ul style="padding-left: 1.2rem; margin-bottom: 0;">
+            <li><strong>Credit Score ≥700</strong>: Preferred lending criteria</li>
+            <li><strong>Monthly payments ≤35%</strong>: Recommended affordability threshold</li>
+            <li><strong>Asset coverage ≥125%</strong>: Optimal security position</li>
+            <li><strong>Employment history ≥2 years</strong>: Stability benchmark</li>
+            <li><strong>Debt-to-income ≤40%</strong>: Maximum recommended ratio</li>
+            <li><strong>Credit inquiries ≤3</strong>: Annual application limit</li>
+            </ul>
             </div>
-            """,
-            unsafe_allow_html=True
-        )
-
+            """, unsafe_allow_html=True)
+    
+    # Footer with Disclaimer
     st.markdown("---")
-    st.markdown('<div style="text-align:center; color:var(--secondary-text-color); font-size:0.85rem;">Important Disclaimer: This tool provides a preliminary assessment. Final approval depends on documentation and lender policies. © 2026 Smart Solution to tough data</div>', unsafe_allow_html=True)
-
+    st.markdown("""
+    <div class="disclaimer-box">
+    <p><strong>Important Notice:</strong> This credit risk assessment system provides preliminary evaluation based on machine learning models. All assessments are indicative and do not constitute financial advice or credit guarantees. Final lending decisions remain at the discretion of individual financial institutions based on comprehensive underwriting processes. Users should consult with qualified financial advisors before making borrowing decisions. Model accuracy may vary based on input data quality and completeness.</p>
+    <p style="margin-top: 0.5rem; text-align: center; font-weight: 600;">© 2026 Smart Solution to tough data</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
