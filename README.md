@@ -25,12 +25,14 @@ Visual patterns that aligned with real‑world lending logic
 
 3. Model Development
 I tested several algorithms, treating each like a different “loan officer”:
+
 | Model               | Accuracy | Strength                     |
 |--------------------|---------|------------------------------|
 | XGBoost (Tuned)     | 97.9%   | Excellent pattern recognition |
 | Random Forest       | 97.8%   | Robust and stable            |
 | Gradient Boosting   | 97.2%   | Strong sequential learning   |
 | Logistic Regression | 96.0%   | Transparent and interpretable |
+
 
 ## Beyond Accuracy
 Key performance metrics:
