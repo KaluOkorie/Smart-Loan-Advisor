@@ -19,7 +19,16 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import matplotlib.pyplot as plt
 import plotly.io as pio
-
+import plotly.io as pio
+# Configure Kaleido for headless environments like Streamlit Cloud
+if not pio.kaleido.scope.chromium_args:
+    pio.kaleido.scope.chromium_args = (
+        "--headless",
+        "--no-sandbox",
+        "--single-process",
+        "--disable-dev-shm-usage",
+        "--disable-gpu"
+    )
 # ---------------------------------------------------------
 # SETUP & CONFIGURATION
 # ---------------------------------------------------------
