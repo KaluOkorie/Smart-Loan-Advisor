@@ -11,9 +11,9 @@ import plotly.express as px
 from datetime import datetime
 import numpy as np
 import time
-import shap
 import matplotlib.pyplot as plt
 import plotly.io as pio
+import sys
 
 # ---------------------------------------------------------
 # SETUP & CONFIGURATION
@@ -24,6 +24,23 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Try to import SHAP with graceful fallback
+SHAP_AVAILABLE = False
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError as e:
+    st.warning("SHAP library not available. Feature importance explanations will be limited.")
+    # Create a dummy shap module to avoid errors
+    class DummyShap:
+        class TreeExplainer:
+            def __init__(self, model):
+                self.model = model
+            def shap_values(self, X):
+                return [np.zeros((X.shape[0], X.shape[1]))]
+    
+    shap = DummyShap()
 
 # Professional CSS
 st.markdown("""
@@ -419,7 +436,14 @@ def generate_shap_explanation(model, X_input, feature_names):
         
         return feature_df
     except Exception as e:
-        st.error(f"SHAP explanation error: {str(e)}")
+        # Fallback to feature importance from model if available
+        if hasattr(model, 'feature_importances_'):
+            feature_importance = model.feature_importances_
+            feature_df = pd.DataFrame({
+                'Feature': feature_names[:len(feature_importance)],
+                'Impact': feature_importance
+            }).sort_values('Impact', ascending=False).head(10)
+            return feature_df
         return None
 
 def display_detailed_report(results):
@@ -518,12 +542,12 @@ def display_detailed_report(results):
     
     st.markdown("---")
     
-    # SHAP Feature Importance
+    # Feature Importance
     if results.get('shap_data') is not None and not results['shap_data'].empty:
         st.markdown("#### Top Decision Factors")
-        shap_data = results['shap_data'].head(8)
+        feature_data = results['shap_data'].head(8)
         
-        for i, (_, row) in enumerate(shap_data.iterrows()):
+        for i, (_, row) in enumerate(feature_data.iterrows()):
             feature_name = row['Feature'].replace('_', ' ').title()
             impact = row['Impact']
             
@@ -534,6 +558,24 @@ def display_detailed_report(results):
                 st.markdown(f"`{impact:.4f}`")
         
         st.markdown("*Higher values indicate greater impact on the decision*")
+    else:
+        # Display key financial factors if SHAP data is not available
+        st.markdown("#### Key Financial Factors")
+        key_factors = [
+            ("Credit Score", results['applicant_data']['credit_score'], 700, "Higher is better"),
+            ("Monthly Payment Ratio", f"{results['features']['monthly_payment_ratio']:.1f}%", 35, "Lower is better"),
+            ("Asset Coverage", f"{results['features']['asset_coverage']:.1f}%", 125, "Higher is better"),
+            ("Loan to Income", f"{(results['applicant_data']['loan_amount'] / results['applicant_data']['income_annum']) * 100:.1f}%", 400, "Lower is better")
+        ]
+        
+        for factor, value, threshold, advice in key_factors:
+            col1, col2, col3 = st.columns([2, 1, 2])
+            with col1:
+                st.markdown(f"**{factor}**")
+            with col2:
+                st.markdown(f"`{value}`")
+            with col3:
+                st.markdown(f"*{advice}*")
     
     st.markdown("---")
     
@@ -651,12 +693,12 @@ def create_feature_radar(features):
     
     return fig
 
-def create_shap_chart(shap_data):
-    """Create horizontal bar chart for SHAP feature importance"""
-    if shap_data is None or shap_data.empty:
+def create_feature_importance_chart(feature_data):
+    """Create horizontal bar chart for feature importance"""
+    if feature_data is None or feature_data.empty:
         return None
     
-    plot_data = shap_data.head(8).sort_values('Impact', ascending=True)
+    plot_data = feature_data.head(8).sort_values('Impact', ascending=True)
     
     fig = go.Figure(go.Bar(
         x=plot_data['Impact'],
@@ -864,7 +906,7 @@ def main():
         # Calculate matching score
         matching_score = calculate_matching_score(df_features.iloc[0])
         
-        # Load model and predict - NO FALLBACK
+        # Load model and predict
         try:
             model = joblib.load("best_xgb_model.pkl")
             feature_columns = joblib.load("feature_columns.pkl")
@@ -878,8 +920,8 @@ def main():
             approval_probability = model.predict_proba(X_input)[0, 1] * 100
             prediction = model.predict(X_input)[0]
             
-            # Generate SHAP explanation
-            shap_data = generate_shap_explanation(model, X_input, feature_columns)
+            # Generate feature importance explanation
+            feature_data = generate_shap_explanation(model, X_input, feature_columns)
             
         except FileNotFoundError as e:
             st.error(f"Model file not found: {e}")
@@ -920,7 +962,7 @@ def main():
             'recommendations': recommendations,
             'applicant_data': uk_display_data,
             'features': df_features.iloc[0].to_dict(),
-            'shap_data': shap_data
+            'shap_data': feature_data
         }
     
     # Display results if available
@@ -974,11 +1016,11 @@ def main():
         with col2:
             st.plotly_chart(create_feature_radar(results['features']), use_container_width=True)
         
-        # SHAP Explanation Chart
+        # Feature Importance Chart
         if results.get('shap_data') is not None:
-            shap_chart = create_shap_chart(results['shap_data'])
-            if shap_chart:
-                st.plotly_chart(shap_chart, use_container_width=True)
+            feature_chart = create_feature_importance_chart(results['shap_data'])
+            if feature_chart:
+                st.plotly_chart(feature_chart, use_container_width=True)
         
         # Financial Health Indicators
         st.markdown('<h3 class="sub-header">Financial Health Metrics</h3>', unsafe_allow_html=True)
@@ -1055,8 +1097,8 @@ def main():
             **3. Risk Scoring**
             Generation of 0-100 risk score based on creditworthiness assessment.
             
-            **4. SHAP Explanation**
-            Transparent explanation of model decisions using Shapley values.
+            **4. Feature Importance**
+            Explanation of model decisions using feature importance analysis.
             
             **5. Actionable Reporting**
             Detailed recommendations and professional documentation.
@@ -1072,7 +1114,7 @@ def main():
             ### System Capabilities
             
             • **Predictive Accuracy**: Machine learning model trained on historical data  
-            • **Transparent Decisions**: SHAP-based feature importance explanations  
+            • **Transparent Decisions**: Feature importance explanations  
             • **Professional Reporting**: Comprehensive assessment reports  
             • **Real-time Processing**: Instant assessment with rate limiting  
             • **UK Compliance**: Adherence to UK lending standards and regulations  
