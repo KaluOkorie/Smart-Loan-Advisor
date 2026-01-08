@@ -25,23 +25,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Try to import SHAP with graceful fallback
-SHAP_AVAILABLE = False
-try:
-    import shap
-    SHAP_AVAILABLE = True
-except ImportError as e:
-    st.warning("SHAP library not available. Feature importance explanations will be limited.")
-    # Create a dummy shap module to avoid errors
-    class DummyShap:
-        class TreeExplainer:
-            def __init__(self, model):
-                self.model = model
-            def shap_values(self, X):
-                return [np.zeros((X.shape[0], X.shape[1]))]
-    
-    shap = DummyShap()
-
 # Professional CSS
 st.markdown("""
 <style>
@@ -142,6 +125,26 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# LAZY LOADING OF MODEL
+# ---------------------------------------------------------
+@st.cache_resource(show_spinner=False)
+def load_model_and_features():
+    """Load model and feature columns once at startup"""
+    try:
+        model = joblib.load("best_xgb_model.pkl")
+        feature_columns = joblib.load("feature_columns.pkl")
+        return model, feature_columns
+    except FileNotFoundError as e:
+        st.error(f"Model files not found: {e}")
+        st.stop()
+    except Exception as e:
+        st.error(f"Error loading model: {e}")
+        st.stop()
+
+# Load model and features once
+MODEL, FEATURE_COLUMNS = load_model_and_features()
 
 # ---------------------------------------------------------
 # INITIALIZE SESSION STATE
@@ -416,34 +419,40 @@ def generate_detailed_recommendations(score, features, applicant_data, predictio
     
     return recommendations
 
-def generate_shap_explanation(model, X_input, feature_names):
-    """Generate SHAP-based explanation for model decision"""
+def generate_feature_importance_explanation(model, X_input, feature_names):
+    """Generate feature importance explanation using XGBoost's built-in feature importance"""
     try:
-        # Create SHAP explainer
-        explainer = shap.TreeExplainer(model)
-        shap_values = explainer.shap_values(X_input)
-        
-        # For binary classification
-        if isinstance(shap_values, list):
-            shap_values = shap_values[1]
-        
-        # Get feature importance
-        feature_importance = np.abs(shap_values).mean(0)
-        feature_df = pd.DataFrame({
-            'Feature': feature_names,
-            'Impact': feature_importance[0] if len(feature_importance.shape) > 1 else feature_importance
-        }).sort_values('Impact', ascending=False).head(10)
-        
-        return feature_df
-    except Exception as e:
-        # Fallback to feature importance from model if available
+        # Get feature importance from XGBoost model
         if hasattr(model, 'feature_importances_'):
             feature_importance = model.feature_importances_
+            
+            # Create DataFrame with feature names and importance
             feature_df = pd.DataFrame({
                 'Feature': feature_names[:len(feature_importance)],
                 'Impact': feature_importance
             }).sort_values('Impact', ascending=False).head(10)
+            
             return feature_df
+        else:
+            # Fallback: if model doesn't have feature_importances_, create mock data
+            # based on correlation with prediction probability
+            probabilities = model.predict_proba(X_input)[:, 1]
+            feature_importance = []
+            
+            for i in range(X_input.shape[1]):
+                # Simple correlation between feature and prediction probability
+                correlation = np.corrcoef(X_input[:, i], probabilities)[0, 1]
+                feature_importance.append(abs(correlation) if not np.isnan(correlation) else 0)
+            
+            feature_df = pd.DataFrame({
+                'Feature': feature_names[:len(feature_importance)],
+                'Impact': feature_importance
+            }).sort_values('Impact', ascending=False).head(10)
+            
+            return feature_df
+            
+    except Exception as e:
+        st.warning(f"Feature importance calculation failed: {str(e)}")
         return None
 
 def display_detailed_report(results):
@@ -543,9 +552,9 @@ def display_detailed_report(results):
     st.markdown("---")
     
     # Feature Importance
-    if results.get('shap_data') is not None and not results['shap_data'].empty:
+    if results.get('feature_importance') is not None and not results['feature_importance'].empty:
         st.markdown("#### Top Decision Factors")
-        feature_data = results['shap_data'].head(8)
+        feature_data = results['feature_importance'].head(8)
         
         for i, (_, row) in enumerate(feature_data.iterrows()):
             feature_name = row['Feature'].replace('_', ' ').title()
@@ -559,7 +568,7 @@ def display_detailed_report(results):
         
         st.markdown("*Higher values indicate greater impact on the decision*")
     else:
-        # Display key financial factors if SHAP data is not available
+        # Display key financial factors if feature importance data is not available
         st.markdown("#### Key Financial Factors")
         key_factors = [
             ("Credit Score", results['applicant_data']['credit_score'], 700, "Higher is better"),
@@ -906,26 +915,19 @@ def main():
         # Calculate matching score
         matching_score = calculate_matching_score(df_features.iloc[0])
         
-        # Load model and predict
         try:
-            model = joblib.load("best_xgb_model.pkl")
-            feature_columns = joblib.load("feature_columns.pkl")
-            
-            # Prepare features for model
+            # Prepare features for model using globally loaded model and features
             X_input = df_input.drop(columns=['total_assets'])
             X_input = pd.get_dummies(X_input)
-            X_input = X_input.reindex(columns=feature_columns, fill_value=0)
+            X_input = X_input.reindex(columns=FEATURE_COLUMNS, fill_value=0)
             
-            # Get prediction
-            approval_probability = model.predict_proba(X_input)[0, 1] * 100
-            prediction = model.predict(X_input)[0]
+            # Get prediction using pre-loaded model
+            approval_probability = MODEL.predict_proba(X_input)[0, 1] * 100
+            prediction = MODEL.predict(X_input)[0]
             
             # Generate feature importance explanation
-            feature_data = generate_shap_explanation(model, X_input, feature_columns)
+            feature_data = generate_feature_importance_explanation(MODEL, X_input.values, FEATURE_COLUMNS)
             
-        except FileNotFoundError as e:
-            st.error(f"Model file not found: {e}")
-            st.stop()
         except Exception as e:
             st.error(f"Model execution error: {str(e)}")
             st.stop()
@@ -962,7 +964,7 @@ def main():
             'recommendations': recommendations,
             'applicant_data': uk_display_data,
             'features': df_features.iloc[0].to_dict(),
-            'shap_data': feature_data
+            'feature_importance': feature_data
         }
     
     # Display results if available
@@ -1017,8 +1019,8 @@ def main():
             st.plotly_chart(create_feature_radar(results['features']), use_container_width=True)
         
         # Feature Importance Chart
-        if results.get('shap_data') is not None:
-            feature_chart = create_feature_importance_chart(results['shap_data'])
+        if results.get('feature_importance') is not None:
+            feature_chart = create_feature_importance_chart(results['feature_importance'])
             if feature_chart:
                 st.plotly_chart(feature_chart, use_container_width=True)
         
