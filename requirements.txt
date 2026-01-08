@@ -1,56 +1,10 @@
-# Core Data Science & Machine Learning
-numpy==1.24.3
+streamlit==1.28.1
 pandas==2.0.3
+numpy==1.24.3
 scikit-learn==1.3.0
 xgboost==1.7.6
 shap==0.42.1
 joblib==1.3.2
-
-# Streamlit & Web Framework
-streamlit==1.28.1
-streamlit-option-menu==0.3.6
-
-# Data Visualization
 plotly==5.17.0
-matplotlib==3.7.2
-seaborn==0.12.2
-
-# Document Generation
 python-docx==0.8.11
-reportlab==4.0.4
-
-# Data Processing & Utilities
-python-dateutil==2.8.2
-pytz==2023.3
-tzdata==2023.3
-
-# System & File Operations
-pyyaml==6.0
-openpyxl==3.1.2
-xlrd==2.0.1
-
-# Web & HTTP
-requests==2.31.0
-urllib3==2.0.7
-
-# Development & Testing
-pytest==7.4.2
-black==23.9.1
-flake8==6.1.0
-mypy==1.5.1
-
-# Additional Utilities
-tqdm==4.66.1
-colorama==0.4.6
-click==8.1.7
-
-# Streamlit Extensions (Optional)
-streamlit-aggrid==0.3.4.post3
-streamlit-extras==0.3.0
-
-# Word Document Dependencies
 lxml==4.9.3
-Pillow==10.0.1
-
-# PDF Generation (Fallback)
-fpdf2==2.7.5
