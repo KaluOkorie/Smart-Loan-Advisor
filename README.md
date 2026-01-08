@@ -55,7 +55,8 @@ Real‑time loan assessment
 Matching score (0–100) for intuitive interpretation
 Personalised financial recommendations
 Visual breakdown of strengths and risks
-Downloadable assessment reports
+Deployment Architecture: Feature Engineering Pipeline → XGBoost Model → Streamlit Frontend → Docker → Hugging Face Spaces
+[👉 Live Demo Here](https://huggingface.co/spaces/Kalu0147/credit-risk-advisor)
 
 ## Architecture
 Feature Engineering Pipeline
