@@ -2,7 +2,6 @@
 Smart Credit Risk Advisor
 Professional Loan Eligibility Assessment System
 """
-
 import streamlit as st
 import pandas as pd
 import joblib
