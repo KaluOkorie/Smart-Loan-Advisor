@@ -19,6 +19,8 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import matplotlib.pyplot as plt
 import plotly.io as pio
+import os
+import sys
 
 # ---------------------------------------------------------
 # SETUP & CONFIGURATION
@@ -111,6 +113,14 @@ st.markdown("""
         font-size: 0.85rem;
         line-height: 1.4;
     }
+    
+    .fallback-container {
+        background-color: #e8f5e9;
+        padding: 1.2rem;
+        border-radius: 8px;
+        border: 1px solid #81c784;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -123,6 +133,57 @@ if 'results' not in st.session_state:
     st.session_state.results = None
 if 'charts' not in st.session_state:
     st.session_state.charts = {}
+if 'kaleido_available' not in st.session_state:
+    st.session_state.kaleido_available = None
+
+# ---------------------------------------------------------
+# KALEIDO CHECK & CONFIGURATION
+# ---------------------------------------------------------
+def check_kaleido_availability():
+    """Check if Kaleido is available and configure it properly"""
+    try:
+        # First, try to import kaleido
+        import kaleido
+        st.session_state.kaleido_available = True
+        
+        # Configure Kaleido for headless environments
+        if hasattr(pio.kaleido.scope, 'chromium_args'):
+            pio.kaleido.scope.chromium_args = tuple([
+                "--headless",
+                "--no-sandbox",
+                "--single-process",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--no-zygote",
+                "--disable-setuid-sandbox",
+                "--disable-web-security"
+            ])
+        
+        # Try to set executable path for Streamlit Cloud
+        possible_paths = [
+            "/usr/bin/chromium-browser",
+            "/usr/bin/chromium",
+            "/usr/bin/google-chrome",
+            "/usr/bin/chrome",
+            "/snap/bin/chromium"
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                pio.kaleido.scope.chromium_executable = path
+                break
+        
+        return True
+    except ImportError:
+        st.session_state.kaleido_available = False
+        return False
+    except Exception as e:
+        st.session_state.kaleido_available = False
+        return False
+
+# Check Kaleido on startup
+if st.session_state.kaleido_available is None:
+    check_kaleido_availability()
 
 # ---------------------------------------------------------
 # UK FINANCIAL STANDARDS
@@ -411,17 +472,71 @@ def generate_shap_explanation(model, X_input, feature_names):
         return None
 
 # ---------------------------------------------------------
+# VISUALIZATION FUNCTIONS
+# ---------------------------------------------------------
+def create_matplotlib_fallback(fig_title, filename):
+    """Create a fallback image using matplotlib when Kaleido fails"""
+    try:
+        plt.figure(figsize=(8, 5))
+        plt.text(0.5, 0.5, fig_title, 
+                horizontalalignment='center', 
+                verticalalignment='center', 
+                transform=plt.gca().transAxes,
+                fontsize=14,
+                color='gray')
+        plt.axis('off')
+        plt.tight_layout()
+        plt.savefig(filename, dpi=150, bbox_inches='tight', 
+                   facecolor='white', edgecolor='none')
+        plt.close()
+        return True
+    except Exception as e:
+        st.warning(f"Matplotlib fallback failed: {str(e)}")
+        return False
+
+def save_plotly_fig(fig, filename, fig_title="Chart"):
+    """Save Plotly figure as image with robust fallback mechanisms"""
+    temp_filename = f"temp_{filename}"
+    
+    # Method 1: Try Kaleido first
+    if st.session_state.kaleido_available:
+        try:
+            img_bytes = pio.to_image(fig, format='png', width=600, height=400, 
+                                   engine='kaleido', scale=2)
+            with open(temp_filename, 'wb') as f:
+                f.write(img_bytes)
+            
+            # Rename to final filename
+            os.rename(temp_filename, filename)
+            return filename
+        except Exception as e:
+            st.warning(f"Kaleido export failed, trying alternative methods: {str(e)}")
+    
+    # Method 2: Try Plotly's built-in methods
+    try:
+        fig.write_image(filename, width=600, height=400, scale=2)
+        return filename
+    except Exception as e:
+        st.warning(f"Plotly write_image failed: {str(e)}")
+    
+    # Method 3: Use matplotlib fallback
+    if create_matplotlib_fallback(fig_title, filename):
+        return filename
+    
+    # Method 4: Create a basic text file as last resort
+    try:
+        with open(filename, 'w') as f:
+            f.write(f"Chart: {fig_title}\nGenerated: {datetime.now()}\n")
+        return filename
+    except Exception as e:
+        st.error(f"All image export methods failed: {str(e)}")
+        return None
+
+# ---------------------------------------------------------
 # WORD DOCUMENT REPORT GENERATION
 # ---------------------------------------------------------
-def save_plotly_fig(fig, filename):
-    """Save Plotly figure as image"""
-    img_bytes = pio.to_image(fig, format='png', width=600, height=400)
-    with open(filename, 'wb') as f:
-        f.write(img_bytes)
-    return filename
-
 def create_word_report(applicant_data, results, features, shap_data):
-    """Generate comprehensive Word document report"""
+    """Generate comprehensive Word document report with robust image handling"""
     doc = Document()
     
     # Title
@@ -435,6 +550,14 @@ def create_word_report(applicant_data, results, features, shap_data):
     date_run.italic = True
     
     doc.add_paragraph()
+    
+    # System Status Notice
+    if not st.session_state.kaleido_available:
+        status_para = doc.add_paragraph()
+        status_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        status_run = status_para.add_run('⚠️ Chart Export: Using Fallback Mode')
+        status_run.bold = True
+        status_run.font.color.rgb = RGBColor(255, 152, 0)  # Orange
     
     # Applicant Information Section
     doc.add_heading('Applicant Information', level=1)
@@ -495,45 +618,79 @@ def create_word_report(applicant_data, results, features, shap_data):
     
     doc.add_page_break()
     
-    # Charts Section
+    # Charts Section with robust error handling
     doc.add_heading('Visual Analysis', level=1)
     
     # Gauge Chart
     doc.add_heading('Matching Score Gauge', level=2)
-    gauge_fig = create_score_gauge(results['matching_score'])
-    gauge_file = save_plotly_fig(gauge_fig, 'gauge_chart.png')
-    doc.add_picture(gauge_file, width=Inches(6))
+    try:
+        gauge_fig = create_score_gauge(results['matching_score'])
+        gauge_file = save_plotly_fig(gauge_fig, 'gauge_chart.png', 'Credit Profile Score Gauge')
+        
+        if gauge_file and os.path.exists(gauge_file):
+            doc.add_picture(gauge_file, width=Inches(6))
+        else:
+            fallback_para = doc.add_paragraph()
+            fallback_run = fallback_para.add_run('Chart visualization not available in current environment.')
+            fallback_run.italic = True
+    except Exception as e:
+        error_para = doc.add_paragraph()
+        error_run = error_para.add_run(f'Error generating gauge chart: {str(e)}')
+        error_run.font.color.rgb = RGBColor(255, 0, 0)
+    
     doc.add_paragraph(f"Score Interpretation: {results['status']}")
     
     doc.add_paragraph()
     
     # Radar Chart
     doc.add_heading('Financial Health Radar', level=2)
-    radar_fig = create_feature_radar(features)
-    radar_file = save_plotly_fig(radar_fig, 'radar_chart.png')
-    doc.add_picture(radar_file, width=Inches(6))
+    try:
+        radar_fig = create_feature_radar(features)
+        radar_file = save_plotly_fig(radar_fig, 'radar_chart.png', 'Financial Health Radar')
+        
+        if radar_file and os.path.exists(radar_file):
+            doc.add_picture(radar_file, width=Inches(6))
+        else:
+            fallback_para = doc.add_paragraph()
+            fallback_run = fallback_para.add_run('Radar chart visualization not available.')
+            fallback_run.italic = True
+    except Exception as e:
+        error_para = doc.add_paragraph()
+        error_run = error_para.add_run(f'Error generating radar chart: {str(e)}')
+        error_run.font.color.rgb = RGBColor(255, 0, 0)
     
     doc.add_paragraph()
     
     # SHAP Chart
     if shap_data is not None and not shap_data.empty:
         doc.add_heading('Decision Factors Analysis', level=2)
-        shap_fig = create_shap_chart(shap_data)
-        if shap_fig:
-            shap_file = save_plotly_fig(shap_fig, 'shap_chart.png')
-            doc.add_picture(shap_file, width=Inches(6))
-            
-            # Add SHAP explanation
-            doc.add_paragraph()
-            doc.add_heading('Top Decision Factors', level=3)
-            shap_table = doc.add_table(rows=min(6, len(shap_data))+1, cols=2)
-            shap_table.style = 'LightShading-Accent1'
-            shap_table.cell(0, 0).text = "Feature"
-            shap_table.cell(0, 1).text = "Impact Score"
-            
-            for i, row in shap_data.head(6).iterrows():
-                shap_table.cell(i+1, 0).text = row['Feature'].replace('_', ' ').title()
-                shap_table.cell(i+1, 1).text = f"{row['Impact']:.4f}"
+        try:
+            shap_fig = create_shap_chart(shap_data)
+            if shap_fig:
+                shap_file = save_plotly_fig(shap_fig, 'shap_chart.png', 'Feature Impact Analysis')
+                
+                if shap_file and os.path.exists(shap_file):
+                    doc.add_picture(shap_file, width=Inches(6))
+                else:
+                    fallback_para = doc.add_paragraph()
+                    fallback_run = fallback_para.add_run('Feature impact chart not available.')
+                    fallback_run.italic = True
+                
+                # Add SHAP explanation
+                doc.add_paragraph()
+                doc.add_heading('Top Decision Factors', level=3)
+                shap_table = doc.add_table(rows=min(6, len(shap_data))+1, cols=2)
+                shap_table.style = 'LightShading-Accent1'
+                shap_table.cell(0, 0).text = "Feature"
+                shap_table.cell(0, 1).text = "Impact Score"
+                
+                for i, row in shap_data.head(6).iterrows():
+                    shap_table.cell(i+1, 0).text = row['Feature'].replace('_', ' ').title()
+                    shap_table.cell(i+1, 1).text = f"{row['Impact']:.4f}"
+        except Exception as e:
+            error_para = doc.add_paragraph()
+            error_run = error_para.add_run(f'Error generating SHAP chart: {str(e)}')
+            error_run.font.color.rgb = RGBColor(255, 0, 0)
     
     doc.add_page_break()
     
@@ -572,6 +729,15 @@ def create_word_report(applicant_data, results, features, shap_data):
     
     doc.add_paragraph()
     
+    # Technical Notes
+    doc.add_heading('Technical Notes', level=2)
+    if not st.session_state.kaleido_available:
+        doc.add_paragraph("""
+        This report was generated using fallback visualization methods. 
+        For optimal chart quality, ensure the Kaleido package is installed:
+        `pip install kaleido>=0.2.1`
+        """)
+    
     # Disclaimer
     disclaimer = doc.add_paragraph()
     disclaimer_run = disclaimer.add_run('Disclaimer')
@@ -582,6 +748,14 @@ def create_word_report(applicant_data, results, features, shap_data):
     This report does not constitute a loan offer or guarantee of credit approval. 
     All financial decisions should be made in consultation with qualified financial advisors.""")
     
+    # Clean up temporary files
+    try:
+        for temp_file in ['temp_gauge_chart.png', 'temp_radar_chart.png', 'temp_shap_chart.png']:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+    except:
+        pass
+    
     # Save to BytesIO
     doc_bytes = io.BytesIO()
     doc.save(doc_bytes)
@@ -589,9 +763,6 @@ def create_word_report(applicant_data, results, features, shap_data):
     
     return doc_bytes
 
-# ---------------------------------------------------------
-# VISUALIZATION FUNCTIONS
-# ---------------------------------------------------------
 def create_score_gauge(score):
     """Create a professional gauge chart for matching score"""
     colors = ['#ef5350', '#ff9800', '#4caf50', '#2e7d32']
@@ -701,38 +872,20 @@ def create_shap_chart(shap_data):
     )
     
     return fig
-def save_plotly_fig(fig, filename):
-    """Save Plotly figure as image with Kaleido configuration"""
-    try:
-        # Configure Kaleido for headless environments (critical for Streamlit Cloud)
-        import plotly.io as pio
-        
-        # Set Chromium arguments for headless environments[citation:1]
-        if hasattr(pio.kaleido.scope, 'chromium_args'):
-            pio.kaleido.scope.chromium_args = (
-                "--headless",
-                "--no-sandbox", 
-                "--single-process",
-                "--disable-gpu",
-                "--disable-dev-shm-usage"
-            )
-        
-        # Save the figure
-        img_bytes = pio.to_image(fig, format='png', width=600, height=400)
-        with open(filename, 'wb') as f:
-            f.write(img_bytes)
-        return filename
-        
-    except Exception as e:
-        # Fallback: Save as HTML if PNG export fails
-        st.warning(f"Image export using Kaleido failed: {str(e)}. Using HTML fallback.")
-        html_filename = filename.replace('.png', '.html')
-        pio.write_html(fig, file=html_filename)
-        return html_filename
+
 # ---------------------------------------------------------
 # MAIN APPLICATION
 # ---------------------------------------------------------
 def main():
+    # Display Kaleido status
+    if not st.session_state.kaleido_available:
+        st.markdown("""
+        <div class="fallback-container">
+        <strong>⚠️ System Notice:</strong> Kaleido package not available. Using fallback visualization methods. 
+        For optimal chart quality, install: <code>pip install kaleido>=0.2.1</code>
+        </div>
+        """, unsafe_allow_html=True)
+    
     # Header
     st.markdown('<h1 class="main-header">Credit Risk Assessment System</h1>', unsafe_allow_html=True)
     st.markdown("""
@@ -824,6 +977,15 @@ def main():
             """)
         st.markdown('</div>', unsafe_allow_html=True)
         
+        # System Diagnostics
+        if st.checkbox("Show System Diagnostics"):
+            st.markdown('<div class="info-container">', unsafe_allow_html=True)
+            st.write("**System Status:**")
+            st.write(f"- Kaleido Available: {st.session_state.kaleido_available}")
+            st.write(f"- Python Version: {sys.version.split()[0]}")
+            st.write("- Plotly Version: 5.17.0")
+            st.markdown('</div>', unsafe_allow_html=True)
+        
         # Rate limiting
         current_time = time.time()
         time_since_last = current_time - st.session_state.last_submission
@@ -913,7 +1075,7 @@ def main():
         # Calculate matching score
         matching_score = calculate_matching_score(df_features.iloc[0])
         
-        # Load model and predict - NO FALLBACK
+        # Load model and predict
         try:
             model = joblib.load("best_xgb_model.pkl")
             feature_columns = joblib.load("feature_columns.pkl")
@@ -1014,20 +1176,33 @@ def main():
                 value=time_value
             )
         
-        # Charts
+        # Charts with fallback handling
         col1, col2 = st.columns(2)
         
         with col1:
-            st.plotly_chart(create_score_gauge(results['matching_score']), use_container_width=True)
+            try:
+                gauge_fig = create_score_gauge(results['matching_score'])
+                st.plotly_chart(gauge_fig, use_container_width=True)
+            except Exception as e:
+                st.error(f"Error displaying gauge chart: {str(e)}")
+                st.info("Try installing Kaleido: `pip install kaleido>=0.2.1`")
         
         with col2:
-            st.plotly_chart(create_feature_radar(results['features']), use_container_width=True)
+            try:
+                radar_fig = create_feature_radar(results['features'])
+                st.plotly_chart(radar_fig, use_container_width=True)
+            except Exception as e:
+                st.error(f"Error displaying radar chart: {str(e)}")
+                st.info("Try installing Kaleido: `pip install kaleido>=0.2.1`")
         
         # SHAP Explanation Chart
         if results.get('shap_data') is not None:
-            shap_chart = create_shap_chart(results['shap_data'])
-            if shap_chart:
-                st.plotly_chart(shap_chart, use_container_width=True)
+            try:
+                shap_chart = create_shap_chart(results['shap_data'])
+                if shap_chart:
+                    st.plotly_chart(shap_chart, use_container_width=True)
+            except Exception as e:
+                st.error(f"Error displaying SHAP chart: {str(e)}")
         
         # Financial Health Indicators
         st.markdown('<h3 class="sub-header">Financial Health Metrics</h3>', unsafe_allow_html=True)
@@ -1107,6 +1282,12 @@ def main():
                 st.markdown(href, unsafe_allow_html=True)
             except Exception as e:
                 st.error(f"Report generation failed: {str(e)}")
+                st.info("""
+                **Troubleshooting steps:**
+                1. Install Kaleido: `pip install kaleido>=0.2.1`
+                2. Restart the Streamlit app
+                3. Ensure all required files exist
+                """)
     
     else:
         # Welcome screen
