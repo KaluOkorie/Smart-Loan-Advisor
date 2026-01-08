@@ -19,16 +19,23 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import matplotlib.pyplot as plt
 import plotly.io as pio
-import plotly.io as pio
-# Configure Kaleido for headless environments like Streamlit Cloud
-if not pio.kaleido.scope.chromium_args:
-    pio.kaleido.scope.chromium_args = (
-        "--headless",
-        "--no-sandbox",
-        "--single-process",
-        "--disable-dev-shm-usage",
-        "--disable-gpu"
-    )
+# Safer Kaleido configuration for headless environments
+try:
+    # Initialize Kaleido if plotly.kaleido.scope exists
+    if hasattr(pio, 'kaleido') and pio.kaleido and hasattr(pio.kaleido, 'scope') and pio.kaleido.scope:
+        if not pio.kaleido.scope.chromium_args:
+            pio.kaleido.scope.chromium_args = (
+                "--headless",
+                "--no-sandbox", 
+                "--single-process",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--remote-debugging-port=9222"
+            )
+except Exception as e:
+    # Silently fail if Kaleido isn't available yet
+    # It will be initialized properly when first used
+    pass
 # ---------------------------------------------------------
 # SETUP & CONFIGURATION
 # ---------------------------------------------------------
