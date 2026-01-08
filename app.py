@@ -9,18 +9,11 @@ import joblib
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
-import base64
 import numpy as np
-import io
 import time
 import shap
-from docx import Document
-from docx.shared import Inches, Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 import matplotlib.pyplot as plt
 import plotly.io as pio
-import os
-import sys
 
 # ---------------------------------------------------------
 # SETUP & CONFIGURATION
@@ -114,12 +107,21 @@ st.markdown("""
         line-height: 1.4;
     }
     
-    .fallback-container {
-        background-color: #e8f5e9;
-        padding: 1.2rem;
-        border-radius: 8px;
-        border: 1px solid #81c784;
+    .report-section {
+        background-color: #f8f9fa;
+        padding: 1.5rem;
+        border-radius: 10px;
         margin: 1rem 0;
+        border: 1px solid #e0e0e0;
+    }
+    
+    .feature-box {
+        background-color: white;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #3f51b5;
+        margin: 0.5rem 0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -133,57 +135,6 @@ if 'results' not in st.session_state:
     st.session_state.results = None
 if 'charts' not in st.session_state:
     st.session_state.charts = {}
-if 'kaleido_available' not in st.session_state:
-    st.session_state.kaleido_available = None
-
-# ---------------------------------------------------------
-# KALEIDO CHECK & CONFIGURATION
-# ---------------------------------------------------------
-def check_kaleido_availability():
-    """Check if Kaleido is available and configure it properly"""
-    try:
-        # First, try to import kaleido
-        import kaleido
-        st.session_state.kaleido_available = True
-        
-        # Configure Kaleido for headless environments
-        if hasattr(pio.kaleido.scope, 'chromium_args'):
-            pio.kaleido.scope.chromium_args = tuple([
-                "--headless",
-                "--no-sandbox",
-                "--single-process",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--no-zygote",
-                "--disable-setuid-sandbox",
-                "--disable-web-security"
-            ])
-        
-        # Try to set executable path for Streamlit Cloud
-        possible_paths = [
-            "/usr/bin/chromium-browser",
-            "/usr/bin/chromium",
-            "/usr/bin/google-chrome",
-            "/usr/bin/chrome",
-            "/snap/bin/chromium"
-        ]
-        
-        for path in possible_paths:
-            if os.path.exists(path):
-                pio.kaleido.scope.chromium_executable = path
-                break
-        
-        return True
-    except ImportError:
-        st.session_state.kaleido_available = False
-        return False
-    except Exception as e:
-        st.session_state.kaleido_available = False
-        return False
-
-# Check Kaleido on startup
-if st.session_state.kaleido_available is None:
-    check_kaleido_availability()
 
 # ---------------------------------------------------------
 # UK FINANCIAL STANDARDS
@@ -471,246 +422,123 @@ def generate_shap_explanation(model, X_input, feature_names):
         st.error(f"SHAP explanation error: {str(e)}")
         return None
 
-# ---------------------------------------------------------
-# VISUALIZATION FUNCTIONS
-# ---------------------------------------------------------
-def create_matplotlib_fallback(fig_title, filename):
-    """Create a fallback image using matplotlib when Kaleido fails"""
-    try:
-        plt.figure(figsize=(8, 5))
-        plt.text(0.5, 0.5, fig_title, 
-                horizontalalignment='center', 
-                verticalalignment='center', 
-                transform=plt.gca().transAxes,
-                fontsize=14,
-                color='gray')
-        plt.axis('off')
-        plt.tight_layout()
-        plt.savefig(filename, dpi=150, bbox_inches='tight', 
-                   facecolor='white', edgecolor='none')
-        plt.close()
-        return True
-    except Exception as e:
-        st.warning(f"Matplotlib fallback failed: {str(e)}")
-        return False
-
-def save_plotly_fig(fig, filename, fig_title="Chart"):
-    """Save Plotly figure as image with robust fallback mechanisms"""
-    temp_filename = f"temp_{filename}"
+def display_detailed_report(results):
+    """Display comprehensive report in Streamlit"""
+    st.markdown('<div class="report-section">', unsafe_allow_html=True)
+    st.markdown('<h3 class="sub-header">📋 Comprehensive Assessment Report</h3>', unsafe_allow_html=True)
     
-    # Method 1: Try Kaleido first
-    if st.session_state.kaleido_available:
-        try:
-            img_bytes = pio.to_image(fig, format='png', width=600, height=400, 
-                                   engine='kaleido', scale=2)
-            with open(temp_filename, 'wb') as f:
-                f.write(img_bytes)
-            
-            # Rename to final filename
-            os.rename(temp_filename, filename)
-            return filename
-        except Exception as e:
-            st.warning(f"Kaleido export failed, trying alternative methods: {str(e)}")
+    # Applicant Information
+    st.markdown("#### Applicant Information")
+    col1, col2, col3 = st.columns(3)
     
-    # Method 2: Try Plotly's built-in methods
-    try:
-        fig.write_image(filename, width=600, height=400, scale=2)
-        return filename
-    except Exception as e:
-        st.warning(f"Plotly write_image failed: {str(e)}")
+    with col1:
+        st.markdown(f"**Credit Score:** {results['applicant_data']['credit_score']}")
+        st.markdown(f"**Annual Income:** £{results['applicant_data']['income_annum']:,}")
+        st.markdown(f"**Loan Amount:** £{results['applicant_data']['loan_amount']:,}")
     
-    # Method 3: Use matplotlib fallback
-    if create_matplotlib_fallback(fig_title, filename):
-        return filename
+    with col2:
+        st.markdown(f"**Loan Term:** {results['applicant_data']['loan_term']} years")
+        st.markdown(f"**Employment:** {results['applicant_data']['self_employed']}")
+        st.markdown(f"**Education:** {results['applicant_data']['education']}")
     
-    # Method 4: Create a basic text file as last resort
-    try:
-        with open(filename, 'w') as f:
-            f.write(f"Chart: {fig_title}\nGenerated: {datetime.now()}\n")
-        return filename
-    except Exception as e:
-        st.error(f"All image export methods failed: {str(e)}")
-        return None
-
-# ---------------------------------------------------------
-# WORD DOCUMENT REPORT GENERATION
-# ---------------------------------------------------------
-def create_word_report(applicant_data, results, features, shap_data):
-    """Generate comprehensive Word document report with robust image handling"""
-    doc = Document()
+    with col3:
+        st.markdown(f"**Dependents:** {results['applicant_data']['no_of_dependents']}")
+        st.markdown(f"**Total Assets:** £{results['applicant_data']['total_assets']:,}")
+        st.markdown(f"**Report Date:** {datetime.now().strftime('%d %B %Y at %H:%M')}")
     
-    # Title
-    title = doc.add_heading('Credit Risk Assessment Report', 0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    # Date
-    date_para = doc.add_paragraph()
-    date_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    date_run = date_para.add_run(f'Generated: {datetime.now().strftime("%d %B %Y at %H:%M")}')
-    date_run.italic = True
-    
-    doc.add_paragraph()
-    
-    # System Status Notice
-    if not st.session_state.kaleido_available:
-        status_para = doc.add_paragraph()
-        status_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        status_run = status_para.add_run('⚠️ Chart Export: Using Fallback Mode')
-        status_run.bold = True
-        status_run.font.color.rgb = RGBColor(255, 152, 0)  # Orange
-    
-    # Applicant Information Section
-    doc.add_heading('Applicant Information', level=1)
-    
-    info_table = doc.add_table(rows=7, cols=2)
-    info_table.style = 'LightShading-Accent1'
-    
-    rows = [
-        ("Credit Score:", str(applicant_data['credit_score'])),
-        ("Annual Income:", f"£{applicant_data['income_annum']:,}"),
-        ("Loan Amount:", f"£{applicant_data['loan_amount']:,}"),
-        ("Loan Term:", f"{applicant_data['loan_term']} years"),
-        ("Employment:", applicant_data['self_employed']),
-        ("Education:", applicant_data['education']),
-        ("Total Assets:", f"£{applicant_data['total_assets']:,}")
-    ]
-    
-    for i, (label, value) in enumerate(rows):
-        info_table.cell(i, 0).text = label
-        info_table.cell(i, 1).text = value
-    
-    doc.add_paragraph()
+    st.markdown("---")
     
     # Assessment Results
-    doc.add_heading('Assessment Results', level=1)
+    st.markdown("#### Assessment Results")
+    col1, col2, col3, col4 = st.columns(4)
     
-    results_table = doc.add_table(rows=3, cols=2)
-    results_table.style = 'LightShading-Accent1'
+    with col1:
+        st.markdown('<div class="feature-box">', unsafe_allow_html=True)
+        st.markdown(f"**Matching Score**")
+        st.markdown(f"# {results['matching_score']}/100")
+        st.markdown(f"*{results['status']}*")
+        st.markdown('</div>', unsafe_allow_html=True)
     
-    results_rows = [
-        ("Matching Score:", f"{results['matching_score']}/100"),
-        ("Approval Probability:", f"{results['approval_probability']:.1f}%"),
-        ("Risk Assessment:", results['status'])
-    ]
+    with col2:
+        st.markdown('<div class="feature-box">', unsafe_allow_html=True)
+        st.markdown(f"**Approval Probability**")
+        st.markdown(f"# {results['approval_probability']:.1f}%")
+        decision = "Approve" if results['prediction'] == 1 else "Review"
+        st.markdown(f"*{decision}*")
+        st.markdown('</div>', unsafe_allow_html=True)
     
-    for i, (label, value) in enumerate(results_rows):
-        results_table.cell(i, 0).text = label
-        results_table.cell(i, 1).text = value
+    with col3:
+        st.markdown('<div class="feature-box">', unsafe_allow_html=True)
+        st.markdown(f"**Financial Health**")
+        score = results['features']['stability_score'] + results['matching_score'] // 2
+        health_status = "Excellent" if score >= 80 else "Good" if score >= 60 else "Fair"
+        st.markdown(f"# {health_status}")
+        st.markdown(f"*{score}/100*")
+        st.markdown('</div>', unsafe_allow_html=True)
     
-    doc.add_paragraph()
+    with col4:
+        st.markdown('<div class="feature-box">', unsafe_allow_html=True)
+        st.markdown(f"**Risk Level**")
+        risk_level = "Low" if results['matching_score'] >= 70 else "Medium" if results['matching_score'] >= 50 else "High"
+        st.markdown(f"# {risk_level}")
+        color = "#4CAF50" if risk_level == "Low" else "#FF9800" if risk_level == "Medium" else "#F44336"
+        st.markdown(f'<span style="color: {color}; font-weight: bold;">●</span>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown("---")
     
     # Financial Health Metrics
-    doc.add_heading('Financial Health Metrics', level=1)
+    st.markdown("#### Financial Health Metrics")
     
-    metrics_table = doc.add_table(rows=4, cols=2)
-    metrics_table.style = 'LightShading-Accent1'
-    
-    metrics_rows = [
-        ("Monthly Payment Ratio:", f"{features['monthly_payment_ratio']:.1f}%"),
-        ("Asset Coverage:", f"{features['asset_coverage']:.1f}%"),
-        ("Credit Category:", features['credit_category']),
-        ("Stability Score:", f"{features['stability_score']}/45")
+    metrics = [
+        ("Monthly Payment Ratio", f"{results['features']['monthly_payment_ratio']:.1f}%", 
+         results['features']['monthly_payment_ratio'] <= 35, "≤35% recommended"),
+        ("Asset Coverage", f"{results['features']['asset_coverage']:.1f}%", 
+         results['features']['asset_coverage'] >= 125, "≥125% recommended"),
+        ("Credit Category", results['features']['credit_category'], 
+         results['features']['credit_category'] in ['Good', 'Very Good', 'Excellent'], ""),
+        ("Stability Score", f"{results['features']['stability_score']}/45", 
+         results['features']['stability_score'] >= 30, "≥30 recommended"),
+        ("Loan to Income Ratio", f"{(results['applicant_data']['loan_amount'] / results['applicant_data']['income_annum']) * 100:.1f}%", 
+         (results['applicant_data']['loan_amount'] / results['applicant_data']['income_annum']) <= 4, "≤400% recommended")
     ]
     
-    for i, (label, value) in enumerate(metrics_rows):
-        metrics_table.cell(i, 0).text = label
-        metrics_table.cell(i, 1).text = value
+    for metric_name, value, is_good, recommendation in metrics:
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            st.markdown(f"**{metric_name}**")
+        with col2:
+            if is_good:
+                st.markdown(f'<span style="color: #4CAF50;">{value}</span>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<span style="color: #F44336;">{value}</span>', unsafe_allow_html=True)
+        with col3:
+            if recommendation:
+                st.markdown(f'*{recommendation}*')
     
-    doc.add_page_break()
+    st.markdown("---")
     
-    # Charts Section with robust error handling
-    doc.add_heading('Visual Analysis', level=1)
-    
-    # Gauge Chart
-    doc.add_heading('Matching Score Gauge', level=2)
-    try:
-        gauge_fig = create_score_gauge(results['matching_score'])
-        gauge_file = save_plotly_fig(gauge_fig, 'gauge_chart.png', 'Credit Profile Score Gauge')
+    # SHAP Feature Importance
+    if results.get('shap_data') is not None and not results['shap_data'].empty:
+        st.markdown("#### Top Decision Factors")
+        shap_data = results['shap_data'].head(8)
         
-        if gauge_file and os.path.exists(gauge_file):
-            doc.add_picture(gauge_file, width=Inches(6))
-        else:
-            fallback_para = doc.add_paragraph()
-            fallback_run = fallback_para.add_run('Chart visualization not available in current environment.')
-            fallback_run.italic = True
-    except Exception as e:
-        error_para = doc.add_paragraph()
-        error_run = error_para.add_run(f'Error generating gauge chart: {str(e)}')
-        error_run.font.color.rgb = RGBColor(255, 0, 0)
-    
-    doc.add_paragraph(f"Score Interpretation: {results['status']}")
-    
-    doc.add_paragraph()
-    
-    # Radar Chart
-    doc.add_heading('Financial Health Radar', level=2)
-    try:
-        radar_fig = create_feature_radar(features)
-        radar_file = save_plotly_fig(radar_fig, 'radar_chart.png', 'Financial Health Radar')
+        for i, (_, row) in enumerate(shap_data.iterrows()):
+            feature_name = row['Feature'].replace('_', ' ').title()
+            impact = row['Impact']
+            
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"**{i+1}. {feature_name}**")
+            with col2:
+                st.markdown(f"`{impact:.4f}`")
         
-        if radar_file and os.path.exists(radar_file):
-            doc.add_picture(radar_file, width=Inches(6))
-        else:
-            fallback_para = doc.add_paragraph()
-            fallback_run = fallback_para.add_run('Radar chart visualization not available.')
-            fallback_run.italic = True
-    except Exception as e:
-        error_para = doc.add_paragraph()
-        error_run = error_para.add_run(f'Error generating radar chart: {str(e)}')
-        error_run.font.color.rgb = RGBColor(255, 0, 0)
+        st.markdown("*Higher values indicate greater impact on the decision*")
     
-    doc.add_paragraph()
-    
-    # SHAP Chart
-    if shap_data is not None and not shap_data.empty:
-        doc.add_heading('Decision Factors Analysis', level=2)
-        try:
-            shap_fig = create_shap_chart(shap_data)
-            if shap_fig:
-                shap_file = save_plotly_fig(shap_fig, 'shap_chart.png', 'Feature Impact Analysis')
-                
-                if shap_file and os.path.exists(shap_file):
-                    doc.add_picture(shap_file, width=Inches(6))
-                else:
-                    fallback_para = doc.add_paragraph()
-                    fallback_run = fallback_para.add_run('Feature impact chart not available.')
-                    fallback_run.italic = True
-                
-                # Add SHAP explanation
-                doc.add_paragraph()
-                doc.add_heading('Top Decision Factors', level=3)
-                shap_table = doc.add_table(rows=min(6, len(shap_data))+1, cols=2)
-                shap_table.style = 'LightShading-Accent1'
-                shap_table.cell(0, 0).text = "Feature"
-                shap_table.cell(0, 1).text = "Impact Score"
-                
-                for i, row in shap_data.head(6).iterrows():
-                    shap_table.cell(i+1, 0).text = row['Feature'].replace('_', ' ').title()
-                    shap_table.cell(i+1, 1).text = f"{row['Impact']:.4f}"
-        except Exception as e:
-            error_para = doc.add_paragraph()
-            error_run = error_para.add_run(f'Error generating SHAP chart: {str(e)}')
-            error_run.font.color.rgb = RGBColor(255, 0, 0)
-    
-    doc.add_page_break()
-    
-    # Recommendations Section
-    doc.add_heading('Credit Risk Recommendations', level=1)
-    
-    for i, rec in enumerate(results['recommendations'][:5], 1):
-        doc.add_heading(f"{i}. {rec['title']}", level=2)
-        doc.add_paragraph(rec['message'])
-        
-        if rec['actions']:
-            doc.add_heading("Recommended Actions:", level=3)
-            for action in rec['actions']:
-                para = doc.add_paragraph(style='ListBullet')
-                para.add_run(action)
-        
-        doc.add_paragraph()
+    st.markdown("---")
     
     # Credit Management Advice
-    doc.add_heading('Credit Management Guidance', level=1)
+    st.markdown("#### Credit Management Guidance")
     
     advice_items = [
         "Maintain credit utilization below 30% of available limits",
@@ -724,45 +552,24 @@ def create_word_report(applicant_data, results, features, shap_data):
     ]
     
     for item in advice_items:
-        para = doc.add_paragraph(style='ListBullet')
-        para.add_run(item)
+        st.markdown(f"✓ {item}")
     
-    doc.add_paragraph()
-    
-    # Technical Notes
-    doc.add_heading('Technical Notes', level=2)
-    if not st.session_state.kaleido_available:
-        doc.add_paragraph("""
-        This report was generated using fallback visualization methods. 
-        For optimal chart quality, ensure the Kaleido package is installed:
-        `pip install kaleido>=0.2.1`
-        """)
+    st.markdown("---")
     
     # Disclaimer
-    disclaimer = doc.add_paragraph()
-    disclaimer_run = disclaimer.add_run('Disclaimer')
-    disclaimer_run.bold = True
-    
-    doc.add_paragraph("""This assessment is generated by machine learning models and provides preliminary risk evaluation only. 
+    st.markdown("##### Disclaimer")
+    st.markdown("""
+    This assessment is generated by machine learning models and provides preliminary risk evaluation only. 
     Final credit decisions are made by individual lending institutions based on comprehensive underwriting criteria. 
     This report does not constitute a loan offer or guarantee of credit approval. 
-    All financial decisions should be made in consultation with qualified financial advisors.""")
+    All financial decisions should be made in consultation with qualified financial advisors.
+    """)
     
-    # Clean up temporary files
-    try:
-        for temp_file in ['temp_gauge_chart.png', 'temp_radar_chart.png', 'temp_shap_chart.png']:
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-    except:
-        pass
-    
-    # Save to BytesIO
-    doc_bytes = io.BytesIO()
-    doc.save(doc_bytes)
-    doc_bytes.seek(0)
-    
-    return doc_bytes
+    st.markdown('</div>', unsafe_allow_html=True)
 
+# ---------------------------------------------------------
+# VISUALIZATION FUNCTIONS
+# ---------------------------------------------------------
 def create_score_gauge(score):
     """Create a professional gauge chart for matching score"""
     colors = ['#ef5350', '#ff9800', '#4caf50', '#2e7d32']
@@ -877,15 +684,6 @@ def create_shap_chart(shap_data):
 # MAIN APPLICATION
 # ---------------------------------------------------------
 def main():
-    # Display Kaleido status
-    if not st.session_state.kaleido_available:
-        st.markdown("""
-        <div class="fallback-container">
-        <strong>⚠️ System Notice:</strong> Kaleido package not available. Using fallback visualization methods. 
-        For optimal chart quality, install: <code>pip install kaleido>=0.2.1</code>
-        </div>
-        """, unsafe_allow_html=True)
-    
     # Header
     st.markdown('<h1 class="main-header">Credit Risk Assessment System</h1>', unsafe_allow_html=True)
     st.markdown("""
@@ -977,15 +775,6 @@ def main():
             """)
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # System Diagnostics
-        if st.checkbox("Show System Diagnostics"):
-            st.markdown('<div class="info-container">', unsafe_allow_html=True)
-            st.write("**System Status:**")
-            st.write(f"- Kaleido Available: {st.session_state.kaleido_available}")
-            st.write(f"- Python Version: {sys.version.split()[0]}")
-            st.write("- Plotly Version: 5.17.0")
-            st.markdown('</div>', unsafe_allow_html=True)
-        
         # Rate limiting
         current_time = time.time()
         time_since_last = current_time - st.session_state.last_submission
@@ -1075,7 +864,7 @@ def main():
         # Calculate matching score
         matching_score = calculate_matching_score(df_features.iloc[0])
         
-        # Load model and predict
+        # Load model and predict - NO FALLBACK
         try:
             model = joblib.load("best_xgb_model.pkl")
             feature_columns = joblib.load("feature_columns.pkl")
@@ -1176,33 +965,20 @@ def main():
                 value=time_value
             )
         
-        # Charts with fallback handling
+        # Charts
         col1, col2 = st.columns(2)
         
         with col1:
-            try:
-                gauge_fig = create_score_gauge(results['matching_score'])
-                st.plotly_chart(gauge_fig, use_container_width=True)
-            except Exception as e:
-                st.error(f"Error displaying gauge chart: {str(e)}")
-                st.info("Try installing Kaleido: `pip install kaleido>=0.2.1`")
+            st.plotly_chart(create_score_gauge(results['matching_score']), use_container_width=True)
         
         with col2:
-            try:
-                radar_fig = create_feature_radar(results['features'])
-                st.plotly_chart(radar_fig, use_container_width=True)
-            except Exception as e:
-                st.error(f"Error displaying radar chart: {str(e)}")
-                st.info("Try installing Kaleido: `pip install kaleido>=0.2.1`")
+            st.plotly_chart(create_feature_radar(results['features']), use_container_width=True)
         
         # SHAP Explanation Chart
         if results.get('shap_data') is not None:
-            try:
-                shap_chart = create_shap_chart(results['shap_data'])
-                if shap_chart:
-                    st.plotly_chart(shap_chart, use_container_width=True)
-            except Exception as e:
-                st.error(f"Error displaying SHAP chart: {str(e)}")
+            shap_chart = create_shap_chart(results['shap_data'])
+            if shap_chart:
+                st.plotly_chart(shap_chart, use_container_width=True)
         
         # Financial Health Indicators
         st.markdown('<h3 class="sub-header">Financial Health Metrics</h3>', unsafe_allow_html=True)
@@ -1239,6 +1015,9 @@ def main():
             )
             st.caption("Employment, education, dependents")
         
+        # Display Comprehensive Report
+        display_detailed_report(results)
+        
         # Risk Recommendations
         st.markdown('<h3 class="sub-header">Risk Mitigation Recommendations</h3>', unsafe_allow_html=True)
         
@@ -1258,36 +1037,6 @@ def main():
                 for action in rec['actions']:
                     st.write(f"• {action}")
                 st.markdown("</div>", unsafe_allow_html=True)
-        
-        # Word Document Generation
-        st.markdown('<h3 class="sub-header">Download Assessment Report</h3>', unsafe_allow_html=True)
-        
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            st.info("Generate a comprehensive Word document containing all assessment details, visualizations, and credit management recommendations.")
-        
-        with col2:
-            try:
-                doc_bytes = create_word_report(
-                    results['applicant_data'],
-                    results,
-                    results['features'],
-                    results.get('shap_data')
-                )
-                
-                b64 = base64.b64encode(doc_bytes.getvalue()).decode()
-                current_date = datetime.now().strftime("%Y%m%d")
-                href = f'<a href="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64}" download="Credit_Assessment_{current_date}.docx" style="background-color: #1a237e; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600;">Download Word Report</a>'
-                st.markdown(href, unsafe_allow_html=True)
-            except Exception as e:
-                st.error(f"Report generation failed: {str(e)}")
-                st.info("""
-                **Troubleshooting steps:**
-                1. Install Kaleido: `pip install kaleido>=0.2.1`
-                2. Restart the Streamlit app
-                3. Ensure all required files exist
-                """)
     
     else:
         # Welcome screen
@@ -1324,7 +1073,7 @@ def main():
             
             • **Predictive Accuracy**: Machine learning model trained on historical data  
             • **Transparent Decisions**: SHAP-based feature importance explanations  
-            • **Professional Reporting**: Comprehensive Word document generation  
+            • **Professional Reporting**: Comprehensive assessment reports  
             • **Real-time Processing**: Instant assessment with rate limiting  
             • **UK Compliance**: Adherence to UK lending standards and regulations  
             """)
